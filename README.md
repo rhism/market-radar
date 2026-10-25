@@ -1,46 +1,54 @@
 # Market Radar — Windows 10 Desktop Widget
 
-Dashboard desktop yang selalu bisa dipasang di atas aplikasi lain, auto-refresh, menampilkan timestamp quote, dan menghasilkan market read berbasis aturan sederhana. **Tidak melakukan transaksi.**
+Dashboard desktop Windows dengan auto-refresh dan timestamp quote. Menampilkan data publik market, market read berbasis aturan, headline, serta analisis AI opsional. **Aplikasi tidak melakukan transaksi.**
 
-## Yang ditampilkan
+## Fitur
 
-- **Crypto/IDR dari INDODAX**: BTC, ETH, SOL, XRP, SUI, QNT, ASTER, NEAR, ALT.
-- **Komoditas & pasar global**: Gold futures, Brent, WTI, USD/IDR, S&P 500, Nasdaq Composite, IHSG, VIX, NVIDIA, Apple, Microsoft.
-- **Market read sederhana**: breadth kripto, perubahan BTC, pergerakan minyak/emas/Nasdaq/VIX, posisi aset di range 24 jam, SMA20 dan RSI14 untuk data pasar yang menyediakan histori.
-- **Headline global** dari Google News RSS (opsional, bergantung jaringan/ketersediaan feed).
-- Always on top, update manual, auto-refresh, dan checkbox Start with Windows.
+- **Semua pair IDR INDODAX yang tersedia di katalog API** — daftar dimuat dinamis, bukan watchlist koin hard-coded. Baris diurutkan berdasarkan volume IDR 24 jam jika data volume tersedia.
+- **Global markets:** Gold futures, Brent/WTI crude, USD/IDR, S&P 500, Nasdaq Composite, IHSG, VIX, NVIDIA, Apple, Microsoft, serta saham BBCA/BBRI/TLKM.
+- **Market read rule-based:** breadth crypto, perubahan BTC, minyak/emas/Nasdaq/VIX, SMA20 dan RSI14 untuk data yang menyediakan histori.
+- **Google News RSS** opsional dengan double-click untuk membuka artikel.
+- **AI analysis via OpenRouter (opsional)**. Tombol `Ask AI (manual)` hanya mengirim satu snapshot saat ditekan; AI tidak dipanggil otomatis tiap refresh. Default model `openrouter/free`, yaitu router untuk model gratis yang tersedia. Kuota/ketersediaan model gratis dapat berubah.
+- Always on top, update manual/otomatis, dan Start with Windows.
 
-## Instalasi di Windows 10
+## Instalasi
 
-1. Ekstrak folder ini ke lokasi permanen, misalnya `Documents\Market Radar`.
-2. Pastikan Python 3.11+ tersedia: https://www.python.org/downloads/windows/ . Installer resmi Python biasanya menyertakan Tkinter. Aktifkan Python launcher bila ditawarkan.
-3. Klik dua kali `Run_Market_Radar.bat`.
-4. Tunggu refresh pertama. Internet diperlukan.
-5. `Always on top` menjaga panel tetap di depan jendela lain. Aktifkan `Start with Windows` jika ingin dashboard otomatis terbuka saat login Windows. Ini membuat/menghapus file VBS di folder Startup pengguna sendiri.
+1. Ekstrak folder ke lokasi permanen.
+2. Pastikan Python 3.11+ terpasang dari https://www.python.org/downloads/windows/ dan Tkinter tersedia.
+3. Klik dua kali `Run_Market_Radar.bat`. Tidak ada paket tambahan yang harus dipasang.
+4. AI tidak wajib. Dashboard harga, market read rule-based, dan headline tetap berjalan tanpa API key.
 
-Aplikasi memakai pustaka standar Python; tidak perlu `pip install`, API key, akun, wallet, atau kredensial exchange.
+## Mengaktifkan AI (opsional)
 
-## Sumber data dan frekuensi
+1. Buat API key di https://openrouter.ai/settings/keys.
+2. Di Market Radar, klik `AI Settings`, masukkan key, dan biarkan model `openrouter/free` kecuali ingin memilih model ID lain.
+3. Klik `Save`, lalu `Ask AI (manual)` untuk meminta analisis snapshot.
 
-- Kripto: `https://indodax.com/api/summaries` — API publik resmi INDODAX yang didokumentasikan di https://github.com/btcid/indodax-official-api-docs . Auto-refresh sekitar 90 detik.
-- Komoditas, FX, indeks, saham: endpoint chart Yahoo Finance (tidak resmi, dapat berubah/gagal dan quote bisa tertunda). Auto-refresh sekitar 5 menit.
-- Berita: Google News RSS, sekitar 15 menit. RSS dapat tertunda atau tidak tersedia; buka artikel untuk memeriksa tanggal dan sumber asli.
-- Bursa saham dan futures mengikuti jam sesi masing-masing. Akhir pekan sering hanya menampilkan quote sesi Jumat. Kolom Quote time memperlihatkan usia data jika sumber memberikan timestamp.
+API key **tidak ditanam di source code atau README**. Di Windows, aplikasi mengenkripsi key menggunakan Windows DPAPI dan menyimpan hasil terenkripsinya di `%APPDATA%\MarketRadar\settings.json`, di luar folder repo. File settings tersebut tidak perlu diunggah ke GitHub. Tombol `Remove saved key` menghapus key terenkripsi yang tersimpan. Jangan menaruh key di source code atau membagikannya lewat chat.
 
-## Batasan analisis
+Panggilan AI manual menggunakan kuota akun OpenRouter. Model `openrouter/free` tidak menjamin kapasitas/kecepatan tertentu dan dapat gagal jika kuota atau penyedia model sedang tidak tersedia.
 
-Market read **bukan ramalan AI dan bukan sinyal trading terjamin**. Watchlist crypto memakai perubahan 24 jam serta posisi harga di low–high 24 jam. SMA20 dan RSI14 dihitung dari histori harian Yahoo. Range 24 jam saja tidak cukup untuk memvalidasi entry; konfirmasi lewat candle timeframe yang relevan dan order book exchange sebelum mengambil keputusan.
+## Sumber data dan refresh
 
-Aplikasi tidak membuka wallet, menyimpan API key, melakukan trading, atau menghubungkan akun.
+- Kripto: `https://indodax.com/api/pairs` dan `https://indodax.com/api/summaries` dari public API INDODAX. Jika katalog pair sementara gagal, aplikasi mencoba menemukan pair IDR dari summaries.
+- Emas, minyak, FX, indeks, dan saham: endpoint chart Yahoo Finance (tidak resmi; dapat berubah/gagal dan quote mungkin tertunda).
+- Berita: Google News RSS; hasil dapat tertunda atau tidak tersedia.
+- Crypto refresh sekitar 90 detik; market global sekitar 5 menit; RSS sekitar 15 menit. Bursa saham/futures mengikuti jam sesi masing-masing. Kolom quote menunjukkan timestamp jika tersedia.
+
+## Batasan
+
+Market read berbasis aturan dan jawaban AI bisa keliru. Angka dan sumber perlu diverifikasi; tidak ada ramalan bottom yang pasti, sinyal terjamin, atau nasihat finansial personal. Aplikasi hanya membaca data publik, tidak membuka wallet, tidak mengakses akun INDODAX, dan tidak melakukan trading.
 
 ## Troubleshooting
 
-- **N/A atau sumber gagal**: klik Update now, cek internet/firewall/proxy atau status sumber. Data yang berhasil terakhir kali tetap tampil dan status menyebut jika sebagian sumber gagal.
-- **Koin tidak tersedia**: pair IDR mungkin tidak ada, sedang maintenance, atau format API berubah. Aplikasi menampilkan N/A, bukan mengarang harga.
-- **Aplikasi tidak terbuka**: jalankan `Run_Market_Radar.bat` dari folder dan pastikan Python 3.11+ serta Tkinter tersedia.
-- **Hapus auto-start**: matikan `Start with Windows`, atau hapus `MarketRadar.vbs` dari `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
+- **N/A / data belum tersedia:** klik Update now dan cek koneksi. Data lama yang berhasil bisa tetap tampil jika sumber gagal.
+- **AI gagal:** periksa API key, model ID, koneksi, serta kuota/ketersediaan OpenRouter. Dashboard non-AI tetap bekerja.
+- **Aplikasi tidak terbuka:** jalankan `Run_Market_Radar_Debug.bat` untuk melihat pesan error; pastikan Python 3.11+ dan Tkinter terpasang.
+- **Menonaktifkan auto-start:** matikan `Start with Windows` atau hapus `MarketRadar.vbs` dari `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
 
 ## Files
 
 - `market_radar.py` — source aplikasi.
-- `Run_Market_Radar.bat` — Windows launcher.
+- `Run_Market_Radar.bat` — launcher normal.
+- `Run_Market_Radar_Debug.bat` — launcher untuk melihat error.
+- `test_market_radar.py` — tes offline; jalankan `python -m unittest -v test_market_radar.py`.
