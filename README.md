@@ -52,3 +52,8 @@ Market read berbasis aturan dan jawaban AI bisa keliru. Angka dan sumber perlu d
 - `Run_Market_Radar.bat` — launcher normal.
 - `Run_Market_Radar_Debug.bat` — launcher untuk melihat error.
 - `test_market_radar.py` — tes offline; jalankan `python -m unittest -v test_market_radar.py`.
+
+
+## Preview
+
+![Market Radar desktop preview](market-radar-preview.png)
