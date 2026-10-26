@@ -16,6 +16,44 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(mr.fmt_pct(1.236), "+1.24%")
         self.assertEqual(mr.fmt_pct(-1.236), "-1.24%")
 
+    def test_compact_idr_volume_format(self):
+        self.assertEqual(mr.fmt_volume_idr(1_250_000_000), "Rp1.25B")
+        self.assertEqual(mr.fmt_volume_idr(1_230_000), "Rp1.23M")
+        self.assertEqual(mr.fmt_volume_idr(1_234), "Rp1.23K")
+        self.assertEqual(mr.fmt_volume_idr(None), "—")
+
+    def test_descending_sort_keeps_missing_values_at_bottom(self):
+        rows = [("low", 1), ("missing", None), ("high", 3)]
+        sorted_rows = mr.MarketRadarApp._sort_valid_and_missing(rows, lambda item: item[1], reverse=True)
+        self.assertEqual([row[0] for row in sorted_rows], ["high", "low", "missing"])
+
+    def test_crypto_search_matches_symbol_name_and_idr_alias(self):
+        assets = [("BTC", "Bitcoin"), ("ETH", "Ethereum"), ("SOL", "Solana")]
+        data = {symbol: {"available": True, "change_pct": 0, "volume_idr": 100}
+                for symbol, _name in assets}
+        self.assertEqual(mr.filter_crypto_assets(assets, data, "bitcoin"), [("BTC", "Bitcoin")])
+        self.assertEqual(mr.filter_crypto_assets(assets, data, "eth idr"), [("ETH", "Ethereum")])
+
+    def test_crypto_local_quick_filters(self):
+        assets = [("BTC", "Bitcoin"), ("ETH", "Ethereum"), ("SOL", "Solana"), ("XRP", "XRP")]
+        data = {
+            "BTC": {"available": True, "change_pct": 3.0, "volume_idr": 400},
+            "ETH": {"available": True, "change_pct": -2.0, "volume_idr": 300},
+            "SOL": {"available": True, "change_pct": 0.0, "volume_idr": 200},
+            "XRP": {"available": False, "change_pct": None, "volume_idr": 100},
+        }
+        self.assertEqual(mr.filter_crypto_assets(assets, data, filter_name="Gainers"), [("BTC", "Bitcoin")])
+        self.assertEqual(mr.filter_crypto_assets(assets, data, filter_name="Losers"), [("ETH", "Ethereum")])
+        self.assertEqual(mr.filter_crypto_assets(assets, data, filter_name="High volume"),
+                         [("BTC", "Bitcoin"), ("ETH", "Ethereum")])
+
+    def test_market_read_has_scannable_sections_and_risk_caveat(self):
+        content = mr.market_analysis({"BTC": {"available": True, "change_pct": -2.5, "position": 0.2}}, {})
+        self.assertIn("RINGKASAN PASAR", content)
+        self.assertIn("KESIMPULAN", content)
+        self.assertIn("CHECKLIST ENTRY", content)
+        self.assertIn("bukan", content.lower())
+
     def test_reclaim_warning_when_near_low(self):
         label, tag = mr.setup_label({"available": True, "change_pct": -4.2, "position": 0.08})
         self.assertIn("tunggu reclaim", label)
