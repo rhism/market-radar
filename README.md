@@ -87,4 +87,4 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 
 > Preview note: this screenshot uses synthetic layout-test values; figures shown are not live market quotes.
 
-![Market Radar v1.3.0 desktop preview](Market Radar Preview.png)
+![Market Radar v1.3.0 desktop preview](market-radar-preview.png)
