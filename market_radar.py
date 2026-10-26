@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.2"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -776,10 +776,23 @@ class MarketRadarApp:
         header.pack(fill="x", padx=16, pady=(12, 7))
         title_box = ctk.CTkFrame(header, fg_color="transparent", corner_radius=0)
         title_box.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(
-            title_box, text="MARKET RADAR", text_color=COLORS["text"],
-            font=("Segoe UI", 22, "bold"), anchor="w", height=30,
-        ).pack(anchor="w", pady=0)
+        # Navigation lives beside the app name, never in the table area.
+        self.page_nav = ctk.CTkFrame(title_box, fg_color="transparent", corner_radius=0)
+        self.page_nav.pack(anchor="w", fill="x", pady=(0, 1))
+        self.market_page_button = ctk.CTkButton(
+            self.page_nav, text="MARKET RADAR", command=lambda: self._show_page("market"),
+            width=205, height=36, corner_radius=8, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 22, "bold"), anchor="w",
+        )
+        self.market_page_button.pack(side="left", padx=(0, 7))
+        self.reads_page_button = ctk.CTkButton(
+            self.page_nav, text="READS & HEADLINES", command=lambda: self._show_page("reads"),
+            width=158, height=32, corner_radius=8, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["muted"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 10, "bold"),
+        )
+        self.reads_page_button.pack(side="left", padx=(0, 0), pady=(2, 0))
         ctk.CTkLabel(
             title_box, text="Crypto · Gold · Oil · US/Indonesia markets · rule-based market read",
             text_color=COLORS["muted"], font=("Segoe UI", 10), anchor="w", height=18,
@@ -860,28 +873,26 @@ class MarketRadarApp:
                 font=("Segoe UI", 15, "bold"), anchor="w",
             ).pack(anchor="w", padx=13, pady=(0, 7))
 
-        body = ttk.Frame(self.root, padding=(16, 0, 16, 10))
-        body.pack(fill="both", expand=True)
-        # The only draggable divider is vertical on screen: it changes left/right widths.
-        self.main_split = ttk.Panedwindow(body, orient="horizontal")
-        self.main_split.pack(fill="both", expand=True)
-        # Keep native ttk shells as direct panes so Tk/ttk background detection remains correct.
-        left_shell = ttk.Frame(self.main_split)
-        right_shell = ttk.Frame(self.main_split)
-        self.main_split.add(left_shell, weight=4)
-        self.main_split.add(right_shell, weight=3)
-        left = ctk.CTkFrame(left_shell, fg_color=COLORS["bg"], corner_radius=0)
-        right = ctk.CTkFrame(right_shell, fg_color=COLORS["bg"], corner_radius=0)
-        left.pack(fill="both", expand=True)
-        right.pack(fill="both", expand=True)
+        body = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
-        left.grid_columnconfigure(0, weight=1)
-        left.grid_rowconfigure(0, weight=54, uniform="left_panels")
-        left.grid_rowconfigure(1, weight=46, uniform="left_panels")
-        crypto_panel = self._make_panel(left, "CRYPTO WATCHLIST · ALL INDODAX IDR PAIRS")
-        crypto_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
-        macro_panel = self._make_panel(left, "GLOBAL MARKETS · COMMODITIES, FX, INDICES & STOCKS")
-        macro_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 5), pady=(5, 0))
+        # Navigation buttons stay in the header. Each page has a draggable
+        # left/right sash so users can give the wider table more room as needed.
+        self.market_page = ctk.CTkFrame(body, fg_color="transparent", corner_radius=0)
+        self.reads_page = ctk.CTkFrame(body, fg_color="transparent", corner_radius=0)
+        self.current_page = "market"
+        self._sashes_initialized: set[str] = set()
+
+        self.market_split = ttk.Panedwindow(self.market_page, orient="horizontal")
+        self.market_split.pack(fill="both", expand=True)
+        market_left_shell = ttk.Frame(self.market_split)
+        market_right_shell = ttk.Frame(self.market_split)
+        self.market_split.add(market_left_shell, weight=57)
+        self.market_split.add(market_right_shell, weight=43)
+        crypto_panel = self._make_panel(market_left_shell, "CRYPTO WATCHLIST · ALL INDODAX IDR PAIRS")
+        crypto_panel.pack(fill="both", expand=True, padx=(0, 4), pady=8)
+        macro_panel = self._make_panel(market_right_shell, "GLOBAL MARKETS · COMMODITIES, FX, INDICES & STOCKS")
+        macro_panel.pack(fill="both", expand=True, padx=(4, 0), pady=8)
 
         crypto_toolbar = ctk.CTkFrame(crypto_panel, fg_color="transparent", corner_radius=0)
         crypto_toolbar.pack(fill="x", padx=10, pady=(0, 7))
@@ -1015,13 +1026,16 @@ class MarketRadarApp:
         self.macro_tree.pack(fill="both", expand=True, padx=(10, 1), pady=(0, 1))
         self._update_macro_headings()
 
-        right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(0, weight=58, uniform="right_panels")
-        right.grid_rowconfigure(1, weight=42, uniform="right_panels")
-        analysis_panel = self._make_panel(right, "MARKET READ & ACTION CHECKLIST")
-        analysis_panel.grid(row=0, column=0, sticky="nsew", padx=(5, 0), pady=(0, 5))
-        news_panel = self._make_panel(right, "GLOBAL HEADLINES · DOUBLE-CLICK TO OPEN")
-        news_panel.grid(row=1, column=0, sticky="nsew", padx=(5, 0), pady=(5, 0))
+        self.reads_split = ttk.Panedwindow(self.reads_page, orient="horizontal")
+        self.reads_split.pack(fill="both", expand=True)
+        reads_left_shell = ttk.Frame(self.reads_split)
+        reads_right_shell = ttk.Frame(self.reads_split)
+        self.reads_split.add(reads_left_shell, weight=58)
+        self.reads_split.add(reads_right_shell, weight=42)
+        analysis_panel = self._make_panel(reads_left_shell, "MARKET READ & ACTION CHECKLIST")
+        analysis_panel.pack(fill="both", expand=True, padx=(0, 4), pady=8)
+        news_panel = self._make_panel(reads_right_shell, "GLOBAL HEADLINES · DOUBLE-CLICK TO OPEN")
+        news_panel.pack(fill="both", expand=True, padx=(4, 0), pady=8)
 
         ai_controls = ctk.CTkFrame(analysis_panel, fg_color="transparent", corner_radius=0)
         ai_controls.pack(fill="x", padx=10, pady=(0, 6))
@@ -1093,16 +1107,53 @@ class MarketRadarApp:
             text="Public data only · AI is optional/manual · No trading or wallet access · Quotes may be delayed · Not financial advice",
             text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w",
         ).pack(fill="x", padx=16, pady=(0, 6))
+        self._show_page("market")
         self.root.after(350, self._set_initial_sashes)
 
+    def _show_page(self, page: str) -> None:
+        """Switch views from the header while keeping the app identity in place."""
+        if page not in {"market", "reads"}:
+            return
+        self.current_page = page
+        self.market_page.pack_forget()
+        self.reads_page.pack_forget()
+        if page == "market":
+            self.market_page.pack(fill="both", expand=True)
+            self.market_page_button.configure(
+                fg_color=COLORS["panel2"], text_color=COLORS["text"],
+                border_color=COLORS["border"],
+            )
+            self.reads_page_button.configure(
+                fg_color="transparent", text_color=COLORS["muted"],
+                border_color=COLORS["bg"],
+            )
+        else:
+            self.reads_page.pack(fill="both", expand=True)
+            self.market_page_button.configure(
+                fg_color="transparent", text_color=COLORS["muted"],
+                border_color=COLORS["bg"],
+            )
+            self.reads_page_button.configure(
+                fg_color="#2d72c7", text_color=COLORS["white"],
+                border_color="#3d83d4",
+            )
+        # Only initializes a sash once per page, preserving manual resizing later.
+        self.root.after(150, self._set_initial_sashes)
+
     def _set_initial_sashes(self) -> None:
-        """Set the initial left/right split; vertical panel dividers are intentionally absent."""
+        """Set the starting left/right width on the currently visible page only."""
         if self.closing:
             return
+        split = self.market_split if self.current_page == "market" else self.reads_split
+        page = self.current_page
+        if page in self._sashes_initialized:
+            return
         try:
-            width = self.main_split.winfo_width()
+            width = split.winfo_width()
             if width > 200:
-                self.main_split.sashpos(0, int(width * 0.57))
+                ratio = 0.57 if page == "market" else 0.58
+                split.sashpos(0, int(width * ratio))
+                self._sashes_initialized.add(page)
         except tk.TclError:
             pass
 
