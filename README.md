@@ -112,3 +112,4 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 > The repository preview image is from an older layout. Replace it with a fresh screenshot after checking v1.6.2 on Windows.
 
 ![Market Radar desktop preview](market-radar-preview.png)
+![Market Radar desktop preview](market-insight-preview.png)
