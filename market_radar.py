@@ -15,7 +15,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -602,7 +602,7 @@ class MarketRadarApp:
         self.news_list.configure(yscrollcommand=news_scroll.set); self.news_list.pack(fill="both",expand=True,padx=8,pady=(0,4)); self.news_list.bind("<Double-Button-1>",self.open_selected_news)
         self.news_footer=ttk.Label(p,text="RSS dapat tertunda; cek tanggal dan sumber asli.",style="Subtitle.TLabel",wraplength=400)
         self.news_footer.pack(anchor="w",padx=8,pady=(0,8))
-        tk.Label(self.root,text="Public data only · AI is optional/manual · No trading or wallet access · Quotes may be delayed · Not financial advice",bg=COLORS["bg"],fg=COLORS["muted"],anchor="w",padx=16,pady=(0,8),font=("Segoe UI",8)).pack(fill="x")
+        tk.Label(self.root,text="Public data only · AI is optional/manual · No trading or wallet access · Quotes may be delayed · Not financial advice",bg=COLORS["bg"],fg=COLORS["muted"],anchor="w",padx=16,font=("Segoe UI",8)).pack(fill="x",pady=(0,8))
 
     def _make_panel(self,parent:ttk.Frame,title:str)->tk.Frame:
         panel=tk.Frame(parent,bg=COLORS["panel"],highlightbackground=COLORS["border"],highlightthickness=1)
