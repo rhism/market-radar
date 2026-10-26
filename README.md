@@ -84,3 +84,9 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 - `Run_Market_Radar_Debug.bat` — launcher with visible errors and dependency check.
 - `requirements.txt` — CustomTkinter dependency.
 - `test_market_radar.py` — offline tests.
+
+## Preview
+
+> Preview note: this screenshot uses synthetic layout-test values; figures shown are not live market quotes.
+
+![Market Radar v1.3.0 desktop preview](market-radar-preview.png)
