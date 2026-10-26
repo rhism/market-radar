@@ -962,7 +962,7 @@ class MarketRadarApp:
 
         body = ttk.Frame(self.root, padding=(16, 0, 16, 12))
         body.pack(fill="both", expand=True)
-        self.main_split = ttk.Panedwindow(body, orient="horizontal", cursor="sb_h_double_arrow")
+        self.main_split = ttk.Panedwindow(body, orient="horizontal")
         self.main_split.pack(fill="both", expand=True)
 
         left = ttk.Frame(self.main_split)
@@ -970,7 +970,7 @@ class MarketRadarApp:
         self.main_split.add(left, weight=4)
         self.main_split.add(right, weight=3)
 
-        self.left_split = ttk.Panedwindow(left, orient="vertical", cursor="sb_v_double_arrow")
+        self.left_split = ttk.Panedwindow(left, orient="vertical")
         self.left_split.pack(fill="both", expand=True, padx=(0, 6))
         crypto_panel = self._make_panel(self.left_split, "CRYPTO WATCHLIST · ALL INDODAX IDR PAIRS")
         macro_panel = self._make_panel(self.left_split, "GLOBAL MARKETS · COMMODITIES, FX, INDICES & STOCKS")
@@ -1040,7 +1040,7 @@ class MarketRadarApp:
         self.macro_tree.pack(fill="both", expand=True, padx=(10, 1), pady=(0, 1))
         self._update_macro_headings()
 
-        self.right_split = ttk.Panedwindow(right, orient="vertical", cursor="sb_v_double_arrow")
+        self.right_split = ttk.Panedwindow(right, orient="vertical")
         self.right_split.pack(fill="both", expand=True, padx=(6, 0))
         analysis_panel = self._make_panel(self.right_split, "MARKET READ & ACTION CHECKLIST")
         news_panel = self._make_panel(self.right_split, "GLOBAL HEADLINES · DOUBLE-CLICK TO OPEN")
