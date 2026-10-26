@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.2"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -559,7 +559,7 @@ class MarketRadarApp:
         root.geometry(f"{window_w}x{window_h}+{max(0, (screen_w-window_w)//2)}+{max(0, (screen_h-window_h)//4)}")
         root.minsize(min(1040, window_w), min(620, window_h))
         root.configure(fg_color=COLORS["bg"])
-        root.attributes("-topmost", True)
+        root.attributes("-topmost", False)
         self.closing = False
         self.refreshing = False
         self.crypto_data: dict[str, dict[str, Any]] = {}
@@ -577,7 +577,7 @@ class MarketRadarApp:
         self.comfortable_rows = False
         self.last_macro_fetch = 0.0
         self.last_news_fetch = 0.0
-        self.auto_top_var = tk.BooleanVar(value=True)
+        self.auto_top_var = tk.BooleanVar(value=False)
         self.auto_start_var = tk.BooleanVar(value=self._autostart_path().exists())
         self.interval_var = tk.StringVar(value="90 detik")
         self._setup_style()
@@ -597,13 +597,13 @@ class MarketRadarApp:
         style.configure("TFrame", background=COLORS["bg"])
         style.configure(
             "Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"],
-            foreground=COLORS["text"], rowheight=28, borderwidth=0, relief="flat",
-            font=("Segoe UI", 9), bordercolor=COLORS["panel"],
+            foreground=COLORS["text"], rowheight=30, borderwidth=0, relief="flat",
+            font=("Segoe UI", 10), bordercolor=COLORS["panel"],
             lightcolor=COLORS["panel"], darkcolor=COLORS["panel"],
         )
         style.configure(
             "Treeview.Heading", background=COLORS["panel2"], foreground=COLORS["text"],
-            font=("Segoe UI", 9, "bold"), padding=(6, 7), relief="flat",
+            font=("Segoe UI", 10, "bold"), padding=(7, 8), relief="flat",
             bordercolor=COLORS["panel"], lightcolor=COLORS["panel"], darkcolor=COLORS["panel"],
         )
         style.map(
@@ -636,11 +636,11 @@ class MarketRadarApp:
         title_box.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
             title_box, text="MARKET RADAR", text_color=COLORS["text"],
-            font=("Segoe UI", 20, "bold"), anchor="w", height=26,
+            font=("Segoe UI", 22, "bold"), anchor="w", height=30,
         ).pack(anchor="w", pady=0)
         ctk.CTkLabel(
             title_box, text="Crypto · Gold · Oil · US/Indonesia markets · rule-based market read",
-            text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w", height=16,
+            text_color=COLORS["muted"], font=("Segoe UI", 10), anchor="w", height=18,
         ).pack(anchor="w", pady=0)
 
         controls = ctk.CTkFrame(header, fg_color="transparent", corner_radius=0)
@@ -649,7 +649,7 @@ class MarketRadarApp:
             controls, text="↻ Update now", command=self.refresh_data, width=112, height=32,
             corner_radius=9, fg_color="#2d72c7", hover_color="#3986df",
             text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 10, "bold"),
         )
         self.update_button.grid(row=0, column=0, padx=(0, 5), pady=(0, 3))
         ctk.CTkCheckBox(
@@ -657,37 +657,37 @@ class MarketRadarApp:
             command=self.toggle_topmost, width=105, height=28, corner_radius=5,
             checkbox_width=16, checkbox_height=16, border_color=COLORS["muted"],
             fg_color="#2d72c7", hover_color="#3986df", text_color=COLORS["text"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).grid(row=0, column=1, padx=4)
         ctk.CTkCheckBox(
             controls, text="Start with Windows", variable=self.auto_start_var,
             command=self.toggle_autostart, width=132, height=28, corner_radius=5,
             checkbox_width=16, checkbox_height=16, border_color=COLORS["muted"],
             fg_color="#2d72c7", hover_color="#3986df", text_color=COLORS["text"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).grid(row=0, column=2, padx=4)
         self.api_docs_button = ctk.CTkButton(
             controls, text="API docs", command=lambda: webbrowser.open(INDODAX_DOCS),
             width=78, height=32, corner_radius=9, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 9),
+            border_color=COLORS["border"], font=("Segoe UI", 10),
         )
         self.api_docs_button.grid(row=0, column=3, padx=(5, 0))
         self.clock_label = ctk.CTkLabel(
             controls, text="WIB --:--:--", text_color=COLORS["muted"],
-            font=("Segoe UI", 9), anchor="e",
+            font=("Segoe UI", 10), anchor="e",
         )
         self.clock_label.grid(row=1, column=0, columnspan=4, sticky="e", pady=(2, 0))
 
         self.status_var = tk.StringVar(value="Menghubungkan ke sumber data publik…")
         status_bar = ctk.CTkFrame(
-            self.root, fg_color=COLORS["panel2"], corner_radius=9, height=32,
+            self.root, fg_color=COLORS["panel2"], corner_radius=9, height=34,
         )
         status_bar.pack(fill="x", padx=16, pady=(0, 9))
         status_bar.pack_propagate(False)
         ctk.CTkLabel(
             status_bar, textvariable=self.status_var, text_color=COLORS["muted"],
-            font=("Segoe UI", 9), anchor="w",
+            font=("Segoe UI", 10), anchor="w",
         ).pack(fill="both", expand=True, padx=13, pady=0)
 
         cards = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
@@ -703,19 +703,19 @@ class MarketRadarApp:
             cards.grid_columnconfigure(i, weight=1, uniform="market_cards")
             frame = ctk.CTkFrame(
                 cards, fg_color=COLORS["panel"], corner_radius=12,
-                border_width=1, border_color=COLORS["border"], height=76,
+                border_width=1, border_color=COLORS["border"], height=82,
             )
             frame.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
             frame.grid_propagate(False)
             ctk.CTkLabel(
-                frame, text=label, text_color=accent, font=("Segoe UI", 8, "bold"),
+                frame, text=label, text_color=accent, font=("Segoe UI", 9, "bold"),
                 anchor="w",
             ).pack(anchor="w", padx=13, pady=(9, 1))
             var = tk.StringVar(value="Loading…")
             self.card_vars[key] = var
             ctk.CTkLabel(
                 frame, textvariable=var, text_color=COLORS["text"],
-                font=("Segoe UI", 13, "bold"), anchor="w",
+                font=("Segoe UI", 15, "bold"), anchor="w",
             ).pack(anchor="w", padx=13, pady=(0, 7))
 
         body = ttk.Frame(self.root, padding=(16, 0, 16, 10))
@@ -748,7 +748,7 @@ class MarketRadarApp:
             placeholder_text="Search symbols or names…", corner_radius=9,
             fg_color=COLORS["panel2"], border_color=COLORS["border"],
             text_color=COLORS["text"], placeholder_text_color=COLORS["muted"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         )
         self.crypto_search_entry.pack(side="left", padx=(0, 7))
         self.crypto_search_entry.bind(
@@ -762,7 +762,7 @@ class MarketRadarApp:
             crypto_toolbar, text="Clear", command=self._clear_crypto_search,
             width=50, height=30, corner_radius=8, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 9),
+            border_color=COLORS["border"], font=("Segoe UI", 10),
         )
         self.clear_search_button.pack(side="left", padx=(0, 7))
         self.crypto_filter_combo = ctk.CTkOptionMenu(
@@ -772,20 +772,20 @@ class MarketRadarApp:
             corner_radius=8, fg_color=COLORS["panel2"], button_color=COLORS["panel2"],
             button_hover_color="#293b51", dropdown_fg_color=COLORS["panel"],
             dropdown_hover_color="#293b51", text_color=COLORS["text"],
-            dropdown_text_color=COLORS["text"], font=("Segoe UI", 9),
-            dropdown_font=("Segoe UI", 9),
+            dropdown_text_color=COLORS["text"], font=("Segoe UI", 10),
+            dropdown_font=("Segoe UI", 10),
         )
         self.crypto_filter_combo.pack(side="left")
         self.crypto_count_var = tk.StringVar(value="0 / 0")
         ctk.CTkLabel(
             crypto_toolbar, textvariable=self.crypto_count_var, text_color=COLORS["muted"],
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 9),
         ).pack(side="left", padx=(8, 0))
         self.density_button = ctk.CTkButton(
             crypto_toolbar, text="Compact rows", command=self.toggle_density,
             width=91, height=29, corner_radius=8, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 8),
+            border_color=COLORS["border"], font=("Segoe UI", 9),
         )
         self.density_button.pack(side="right", padx=(7, 0))
 
@@ -818,7 +818,7 @@ class MarketRadarApp:
         macro_toolbar.pack(fill="x", padx=10, pady=(0, 7))
         ctk.CTkLabel(
             macro_toolbar, text="Category", text_color=COLORS["muted"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).pack(side="left", padx=(0, 7))
         self.macro_category_combo = ctk.CTkOptionMenu(
             macro_toolbar, variable=self.macro_category_var,
@@ -827,14 +827,14 @@ class MarketRadarApp:
             corner_radius=8, fg_color=COLORS["panel2"], button_color=COLORS["panel2"],
             button_hover_color="#293b51", dropdown_fg_color=COLORS["panel"],
             dropdown_hover_color="#293b51", text_color=COLORS["text"],
-            dropdown_text_color=COLORS["text"], font=("Segoe UI", 9),
-            dropdown_font=("Segoe UI", 9),
+            dropdown_text_color=COLORS["text"], font=("Segoe UI", 10),
+            dropdown_font=("Segoe UI", 10),
         )
         self.macro_category_combo.pack(side="left")
         self.macro_count_var = tk.StringVar(value=f"{len(MACRO_ASSETS)} / {len(MACRO_ASSETS)} markets")
         ctk.CTkLabel(
             macro_toolbar, textvariable=self.macro_count_var, text_color=COLORS["muted"],
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 9),
         ).pack(side="left", padx=(8, 0))
         macro_cols = ("asset", "price", "change", "technicals", "asof")
         self.macro_tree = ttk.Treeview(macro_panel, columns=macro_cols, show="headings", height=8)
@@ -875,31 +875,31 @@ class MarketRadarApp:
             ai_controls, text="AI Settings", command=self.open_ai_settings,
             width=84, height=30, corner_radius=8, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 9),
+            border_color=COLORS["border"], font=("Segoe UI", 10),
         )
         self.ai_settings_button.pack(side="left", padx=(0, 5))
         self.ai_button = ctk.CTkButton(
             ai_controls, text="Ask AI (manual)", command=self.run_ai_analysis,
             width=116, height=30, corner_radius=8, fg_color="#2d72c7",
             hover_color="#3986df", text_color=COLORS["white"], border_width=1,
-            border_color="#3d83d4", font=("Segoe UI", 9, "bold"),
+            border_color="#3d83d4", font=("Segoe UI", 10, "bold"),
         )
         self.ai_button.pack(side="left", padx=(0, 8))
         self.ai_status_var = tk.StringVar(value=("AI siap · " + self.ai_model) if self.ai_key else "AI opsional · panggilan hanya saat tombol ditekan")
         ctk.CTkLabel(
             ai_controls, textvariable=self.ai_status_var, text_color=COLORS["muted"],
-            wraplength=190, justify="left", anchor="w", font=("Segoe UI", 8),
+            wraplength=230, justify="left", anchor="w", font=("Segoe UI", 9),
         ).pack(side="left", fill="x", expand=True)
         self.analysis_text = tk.Text(
             analysis_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
             insertbackground=COLORS["text"], relief="flat", padx=12, pady=7,
-            font=("Segoe UI", 9), state="disabled", width=45, height=12,
+            font=("Segoe UI", 10), state="disabled", width=45, height=12,
             spacing1=1, spacing3=1, borderwidth=0, highlightthickness=0,
             selectbackground="#2b4361", selectforeground=COLORS["white"],
         )
-        self.analysis_text.tag_configure("section", font=("Segoe UI", 10, "bold"), foreground=COLORS["blue"], spacing1=4, spacing3=1)
-        self.analysis_text.tag_configure("conclusion", foreground=COLORS["text"], font=("Segoe UI", 9, "bold"), lmargin1=8, lmargin2=8, spacing1=1, spacing3=2)
-        self.analysis_text.tag_configure("note", foreground=COLORS["muted"], font=("Segoe UI", 8))
+        self.analysis_text.tag_configure("section", font=("Segoe UI", 11, "bold"), foreground=COLORS["blue"], spacing1=4, spacing3=1)
+        self.analysis_text.tag_configure("conclusion", foreground=COLORS["text"], font=("Segoe UI", 10, "bold"), lmargin1=8, lmargin2=8, spacing1=1, spacing3=2)
+        self.analysis_text.tag_configure("note", foreground=COLORS["muted"], font=("Segoe UI", 9))
         analysis_scroll = ctk.CTkScrollbar(
             analysis_panel, orientation="vertical", command=self.analysis_text.yview,
             fg_color=COLORS["panel"], button_color=COLORS["panel2"],
@@ -913,12 +913,12 @@ class MarketRadarApp:
             news_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
             selectbackground="#2b4361", selectforeground=COLORS["white"],
             borderwidth=0, highlightthickness=0, relief="flat", padx=9, pady=4,
-            font=("Segoe UI", 9), width=45, height=7, spacing1=1, spacing3=1,
+            font=("Segoe UI", 10), width=45, height=7, spacing1=1, spacing3=1,
             insertbackground=COLORS["text"],
         )
-        self.news_text.tag_configure("news_meta", foreground=COLORS["muted"], font=("Segoe UI", 8), spacing1=1, spacing3=3)
-        self.news_text.tag_configure("news_title", foreground=COLORS["text"], font=("Segoe UI", 9, "bold"), spacing1=2)
-        self.news_text.tag_configure("news_empty", foreground=COLORS["muted"], font=("Segoe UI", 9))
+        self.news_text.tag_configure("news_meta", foreground=COLORS["muted"], font=("Segoe UI", 9), spacing1=1, spacing3=3)
+        self.news_text.tag_configure("news_title", foreground=COLORS["text"], font=("Segoe UI", 10, "bold"), spacing1=2)
+        self.news_text.tag_configure("news_empty", foreground=COLORS["muted"], font=("Segoe UI", 10))
         news_scroll = ctk.CTkScrollbar(
             news_panel, orientation="vertical", command=self.news_text.yview,
             fg_color=COLORS["panel"], button_color=COLORS["panel2"],
@@ -929,7 +929,7 @@ class MarketRadarApp:
         self.news_text.pack(fill="both", expand=True, padx=(10, 2), pady=(0, 1))
         self.news_footer = ctk.CTkLabel(
             news_panel, text="RSS dapat tertunda; cek tanggal dan sumber asli.",
-            text_color=COLORS["muted"], font=("Segoe UI", 8), wraplength=420,
+            text_color=COLORS["muted"], font=("Segoe UI", 9), wraplength=420,
             anchor="w", justify="left",
         )
         self.news_footer.pack(anchor="w", padx=12, pady=(2, 7))
@@ -937,7 +937,7 @@ class MarketRadarApp:
         ctk.CTkLabel(
             self.root,
             text="Public data only · AI is optional/manual · No trading or wallet access · Quotes may be delayed · Not financial advice",
-            text_color=COLORS["muted"], font=("Segoe UI", 8), anchor="w",
+            text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w",
         ).pack(fill="x", padx=16, pady=(0, 6))
         self.root.after(350, self._set_initial_sashes)
 
@@ -958,8 +958,8 @@ class MarketRadarApp:
             border_width=1, corner_radius=13,
         )
         ctk.CTkLabel(
-            panel, text=title, text_color=COLORS["muted"], anchor="w", height=18,
-            font=("Segoe UI", 9, "bold"),
+            panel, text=title, text_color=COLORS["muted"], anchor="w", height=20,
+            font=("Segoe UI", 10, "bold"),
         ).pack(fill="x", padx=13, pady=(7, 4))
         return panel
 
@@ -1255,11 +1255,11 @@ class MarketRadarApp:
         frame.pack(fill="both", expand=True, padx=18, pady=15)
         ctk.CTkLabel(
             frame, text="OpenRouter API key", text_color=COLORS["text"],
-            font=("Segoe UI", 12, "bold"), anchor="w", height=23,
+            font=("Segoe UI", 13, "bold"), anchor="w", height=26,
         ).pack(anchor="w", pady=0)
         ctk.CTkLabel(
             frame, text="Key disimpan terenkripsi oleh Windows, bukan di kode/GitHub.",
-            text_color=COLORS["muted"], font=("Segoe UI", 9), wraplength=470,
+            text_color=COLORS["muted"], font=("Segoe UI", 10), wraplength=470,
             justify="left", anchor="w", height=18,
         ).pack(anchor="w", pady=(1, 6))
         ctk.CTkButton(
@@ -1267,33 +1267,33 @@ class MarketRadarApp:
             command=lambda: webbrowser.open("https://openrouter.ai/settings/keys"),
             width=190, height=31, corner_radius=8, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["text"],
-            border_width=1, border_color=COLORS["border"], font=("Segoe UI", 9),
+            border_width=1, border_color=COLORS["border"], font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(0, 9))
 
         key_field = ctk.CTkEntry(
             frame, height=35, placeholder_text="Paste API key…",
             show="•", corner_radius=9, fg_color=COLORS["panel2"],
             border_color=COLORS["border"], text_color=COLORS["text"],
-            placeholder_text_color=COLORS["muted"], font=("Segoe UI", 9),
+            placeholder_text_color=COLORS["muted"], font=("Segoe UI", 10),
         )
         key_field.pack(fill="x", pady=(0, 9))
         key_field.focus_set()
         ctk.CTkLabel(
             frame, text="Model ID", text_color=COLORS["text"],
-            font=("Segoe UI", 10, "bold"), anchor="w", height=18,
+            font=("Segoe UI", 11, "bold"), anchor="w", height=20,
         ).pack(anchor="w", pady=0)
         model_field = ctk.CTkEntry(
             frame, height=35,
             placeholder_text="Model ID (default: openrouter/free)",
             corner_radius=9, fg_color=COLORS["panel2"], border_color=COLORS["border"],
             text_color=COLORS["text"], placeholder_text_color=COLORS["muted"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         )
         model_field.pack(fill="x", pady=(4, 7))
         model_field.insert(0, self.ai_model or DEFAULT_AI_MODEL)
         ctk.CTkLabel(
             frame, text="AI hanya berjalan saat tombol Ask AI ditekan. Kuota/ketersediaan model gratis tetap terbatas.",
-            text_color=COLORS["muted"], font=("Segoe UI", 8), wraplength=470,
+            text_color=COLORS["muted"], font=("Segoe UI", 9), wraplength=470,
             justify="left", anchor="w", height=32,
         ).pack(anchor="w", pady=(0, 8))
         buttons = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=0)
@@ -1325,19 +1325,19 @@ class MarketRadarApp:
             buttons, text="Cancel", command=win.destroy, width=76, height=31,
             corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
             text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).pack(side="right")
         ctk.CTkButton(
             buttons, text="Remove saved key", command=remove_key, width=132, height=31,
             corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
             text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).pack(side="right", padx=(0, 6))
         ctk.CTkButton(
             buttons, text="Save", command=save, width=72, height=31,
             corner_radius=8, fg_color="#2d72c7", hover_color="#3986df",
             text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 10, "bold"),
         ).pack(side="right", padx=(0, 6))
 
     def run_ai_analysis(self)->None:
@@ -1401,7 +1401,7 @@ class MarketRadarApp:
             frame, text="Close", command=win.destroy, width=78, height=31,
             corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
             text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).pack(anchor="e", pady=(8, 0))
 
     def toggle_topmost(self)->None:self.root.attributes("-topmost",bool(self.auto_top_var.get()))
