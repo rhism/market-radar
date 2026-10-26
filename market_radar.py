@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.7.0"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -787,12 +787,12 @@ class MarketRadarApp:
         )
         self.market_page_button.pack(side="left", padx=(0, 7))
         self.reads_page_button = ctk.CTkButton(
-            self.page_nav, text="READS & HEADLINES", command=lambda: self._show_page("reads"),
-            width=158, height=32, corner_radius=8, fg_color=COLORS["panel2"],
+            self.page_nav, text="MARKET INSIGHT", command=lambda: self._show_page("reads"),
+            width=218, height=36, corner_radius=8, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["muted"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 10, "bold"),
+            border_color=COLORS["border"], font=("Segoe UI", 22, "bold"),
         )
-        self.reads_page_button.pack(side="left", padx=(0, 0), pady=(2, 0))
+        self.reads_page_button.pack(side="left", padx=(0, 0))
         ctk.CTkLabel(
             title_box, text="Crypto · Gold · Oil · US/Indonesia markets · rule-based market read",
             text_color=COLORS["muted"], font=("Segoe UI", 10), anchor="w", height=18,
@@ -1701,6 +1701,12 @@ def main()->None:
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk(fg_color=COLORS["bg"])
+    icon_path = Path(__file__).resolve().with_name("Market_Radar.ico")
+    if icon_path.exists():
+        try:
+            root.iconbitmap(str(icon_path))
+        except tk.TclError:
+            pass
     MarketRadarApp(root)
     root.mainloop()
 
