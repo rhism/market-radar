@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any
 import tkinter as tk
 from tkinter import ttk, messagebox
+import customtkinter as ctk
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -46,301 +47,6 @@ MACRO_ASSETS = [
 COLORS = {"bg":"#0c111b", "panel":"#141d2b", "panel2":"#1b2738", "border":"#29364a",
           "text":"#e6edf7", "muted":"#93a4bb", "green":"#47d7a0", "red":"#ff737e",
           "yellow":"#f1c66d", "blue":"#77b6ff", "white":"#ffffff"}
-
-
-
-def _rounded_points(x1: float, y1: float, x2: float, y2: float, radius: float, steps: int = 6) -> list[float]:
-    """Return smooth polygon points for Canvas-based rounded components."""
-    import math as _math
-    r = max(2.0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
-    corners = (
-        (x2 - r, y1 + r, -90, 0),
-        (x2 - r, y2 - r, 0, 90),
-        (x1 + r, y2 - r, 90, 180),
-        (x1 + r, y1 + r, 180, 270),
-    )
-    points: list[float] = []
-    for cx, cy, start, end in corners:
-        for i in range(steps + 1):
-            angle = _math.radians(start + (end - start) * i / steps)
-            points.extend((cx + r * _math.cos(angle), cy + r * _math.sin(angle)))
-    return points
-
-
-class RoundedSurface(tk.Frame):
-    """A native Tk frame with a softly rounded canvas surface and border."""
-    def __init__(self, master: tk.Misc, *, fill: str = COLORS["panel"],
-                 canvas_bg: str = COLORS["bg"], border: str = COLORS["border"],
-                 radius: int = 12, border_width: int = 1, **kwargs: Any):
-        super().__init__(master, bg=canvas_bg, bd=0, highlightthickness=0, **kwargs)
-        self._surface_fill = fill
-        self._surface_border = border
-        self._surface_radius = radius
-        self._surface_border_width = border_width
-        self._surface_canvas = tk.Canvas(self, bg=canvas_bg, bd=0, highlightthickness=0,
-                                         relief="flat", takefocus=0)
-        self._surface_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self.bind("<Configure>", self._draw_surface, add="+")
-
-    def _draw_surface(self, _event: Any = None) -> None:
-        width, height = self.winfo_width(), self.winfo_height()
-        if width < 3 or height < 3:
-            return
-        canvas = self._surface_canvas
-        canvas.delete("surface")
-        inset = max(0.5, self._surface_border_width / 2)
-        points = _rounded_points(inset, inset, width - inset, height - inset, self._surface_radius)
-        canvas.create_polygon(points, smooth=True, splinesteps=12,
-                              fill=self._surface_fill, outline=self._surface_border,
-                              width=self._surface_border_width, tags="surface")
-        canvas.tag_lower("surface")
-
-
-class RoundedButton(tk.Canvas):
-    """A small, keyboard-independent rounded button drawn with Tk Canvas."""
-    def __init__(self, master: tk.Misc, text: str, command: Any = None, *,
-                 width: int = 100, height: int = 32, bg_color: str = COLORS["bg"],
-                 fill: str = COLORS["panel2"], hover: str = "#293b51",
-                 text_color: str = COLORS["text"], border: str = COLORS["border"],
-                 radius: int = 10, font: tuple[Any, ...] = ("Segoe UI", 9),
-                 **kwargs: Any):
-        super().__init__(master, width=width, height=height, bg=bg_color,
-                         highlightthickness=0, bd=0, relief="flat", cursor="hand2", **kwargs)
-        self._button_text = text
-        self._command = command
-        self._button_fill = fill
-        self._button_hover = hover
-        self._button_text_color = text_color
-        self._button_border = border
-        self._button_radius = radius
-        self._button_font = font
-        self._button_enabled = True
-        self._button_hovered = False
-        self._button_pressed = False
-        self._ready_button = True
-        self.bind("<Configure>", self._draw_button, add="+")
-        self.bind("<Enter>", self._on_enter, add="+")
-        self.bind("<Leave>", self._on_leave, add="+")
-        self.bind("<ButtonPress-1>", self._on_press, add="+")
-        self.bind("<ButtonRelease-1>", self._on_release, add="+")
-        self.bind("<space>", self._on_keyboard, add="+")
-        self.bind("<Return>", self._on_keyboard, add="+")
-        self._draw_button()
-
-    def configure(self, cnf: Any = None, **kwargs: Any) -> Any:
-        # Retain the familiar ttk.Button configure(text=..., state=...) interface.
-        if isinstance(cnf, dict):
-            kwargs = {**cnf, **kwargs}
-            cnf = None
-        redraw = False
-        if "text" in kwargs and hasattr(self, "_button_text"):
-            self._button_text = str(kwargs.pop("text")); redraw = True
-        if "state" in kwargs and hasattr(self, "_button_enabled"):
-            self._button_enabled = kwargs.pop("state") not in ("disabled", tk.DISABLED)
-            redraw = True
-        result = super().configure(cnf, **kwargs)
-        if redraw and hasattr(self, "_ready_button"):
-            self.configure(cursor="hand2" if self._button_enabled else "arrow")
-            self._draw_button()
-        return result
-
-    config = configure
-
-    def _draw_button(self, _event: Any = None) -> None:
-        if not hasattr(self, "_button_text"):
-            return
-        self.delete("button")
-        w, h = max(10, self.winfo_width()), max(10, self.winfo_height())
-        fill = self._button_fill
-        if not self._button_enabled:
-            fill = COLORS["panel"]
-        elif self._button_pressed:
-            fill = self._button_hover
-        elif self._button_hovered:
-            fill = self._button_hover
-        points = _rounded_points(1, 1, w - 1, h - 1, self._button_radius)
-        self.create_polygon(points, smooth=True, splinesteps=12, fill=fill,
-                            outline=self._button_border, width=1, tags="button")
-        fg = self._button_text_color if self._button_enabled else COLORS["muted"]
-        self.create_text(w / 2, h / 2, text=self._button_text, fill=fg,
-                         font=self._button_font, tags="button")
-        self.tag_lower("button")
-
-    def _on_enter(self, _event: Any = None) -> None:
-        self._button_hovered = True
-        self._draw_button()
-
-    def _on_leave(self, _event: Any = None) -> None:
-        self._button_hovered = False
-        self._button_pressed = False
-        self._draw_button()
-
-    def _on_press(self, _event: Any = None) -> None:
-        if self._button_enabled:
-            self._button_pressed = True
-            self._draw_button()
-
-    def _on_release(self, event: Any) -> None:
-        was_pressed = self._button_pressed
-        self._button_pressed = False
-        self._draw_button()
-        if was_pressed and self._button_enabled and 0 <= event.x <= self.winfo_width() and 0 <= event.y <= self.winfo_height():
-            if callable(self._command):
-                self._command()
-
-    def _on_keyboard(self, _event: Any = None) -> str:
-        if self._button_enabled and callable(self._command):
-            self._command()
-        return "break"
-
-
-class RoundedSearchField(tk.Frame):
-    """Rounded, dark search input with a focus ring and non-intrusive placeholder."""
-    def __init__(self, master: tk.Misc, variable: tk.StringVar, *,
-                 width: int = 218, height: int = 34,
-                 placeholder: str = "Search symbols or names…", icon: bool = True,
-                 show: str = "", **kwargs: Any):
-        super().__init__(master, width=width, height=height, bg=COLORS["panel"],
-                         bd=0, highlightthickness=0, **kwargs)
-        self._search_var = variable
-        self._search_placeholder = placeholder
-        self._search_has_icon = icon
-        self._search_focused = False
-        self._search_canvas = tk.Canvas(self, bg=COLORS["panel"], bd=0,
-                                        highlightthickness=0, takefocus=0)
-        self._search_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self.entry = tk.Entry(self, textvariable=variable, bg=COLORS["panel2"],
-                              fg=COLORS["text"], insertbackground=COLORS["text"],
-                              selectbackground="#2b4361", selectforeground=COLORS["white"],
-                              relief="flat", bd=0, highlightthickness=0,
-                              font=("Segoe UI", 9), show=show)
-        left_inset = 34 if icon else 11
-        right_inset = 44 if icon else 21
-        self.entry.place(x=left_inset, y=5, relwidth=1, width=-right_inset, height=height - 10)
-        self.icon_label = None
-        if icon:
-            self.icon_label = tk.Label(self, text="⌕", bg=COLORS["panel2"], fg=COLORS["muted"],
-                                       font=("Segoe UI Symbol", 15), bd=0)
-            self.icon_label.place(x=10, y=3, width=20, height=height - 6)
-            self.icon_label.bind("<Button-1>", lambda _e: self.entry.focus_set())
-        self.hint_label = tk.Label(self, text=placeholder, bg=COLORS["panel2"], fg=COLORS["muted"],
-                                   font=("Segoe UI", 9), anchor="w", bd=0)
-        self.hint_label.place(x=left_inset, y=0, relwidth=1, width=-right_inset, relheight=1)
-        self.hint_label.bind("<Button-1>", lambda _e: self.entry.focus_set())
-        self.entry.bind("<FocusIn>", self._on_focus_in, add="+")
-        self.entry.bind("<FocusOut>", self._on_focus_out, add="+")
-        self.entry.bind("<Configure>", lambda _e: self._update_hint(), add="+")
-        variable.trace_add("write", lambda *_: self._update_hint())
-        self.bind("<Configure>", self._draw_search, add="+")
-        self._update_hint()
-
-    def get(self) -> str:
-        return self._search_var.get()
-
-    def focus_set(self) -> None:
-        self.entry.focus_set()
-
-    def _on_focus_in(self, _event: Any = None) -> None:
-        self._search_focused = True
-        self._update_hint()
-        self._draw_search()
-
-    def _on_focus_out(self, _event: Any = None) -> None:
-        self._search_focused = False
-        self._update_hint()
-        self._draw_search()
-
-    def _update_hint(self) -> None:
-        if not hasattr(self, "hint_label"):
-            return
-        left_inset = 34 if self._search_has_icon else 11
-        right_inset = 44 if self._search_has_icon else 21
-        if self._search_var.get() or self._search_focused or not self._search_placeholder:
-            self.hint_label.place_forget()
-        else:
-            self.hint_label.place(x=left_inset, y=0, relwidth=1, width=-right_inset, relheight=1)
-            self.hint_label.lift()
-            if self.icon_label is not None:
-                self.icon_label.lift()
-
-    def _draw_search(self, _event: Any = None) -> None:
-        w, h = max(10, self.winfo_width()), max(10, self.winfo_height())
-        self._search_canvas.delete("search")
-        outline = COLORS["blue"] if self._search_focused else COLORS["border"]
-        points = _rounded_points(1, 1, w - 1, h - 1, 11)
-        self._search_canvas.create_polygon(points, smooth=True, splinesteps=12,
-                                           fill=COLORS["panel2"], outline=outline,
-                                           width=1, tags="search")
-        self._search_canvas.tag_lower("search")
-
-
-
-class RoundedSelect(tk.Frame):
-    """Compact rounded selector with a matching dark native popup menu."""
-    def __init__(self, master: tk.Misc, variable: tk.StringVar, values: tuple[str, ...],
-                 command: Any = None, *, width: int = 134, height: int = 32):
-        super().__init__(master, width=width, height=height, bg=COLORS["panel"],
-                         bd=0, highlightthickness=0)
-        self._select_var = variable
-        self._select_values = tuple(values)
-        self._select_command = command
-        self._select_focused = False
-        self._select_canvas = tk.Canvas(self, bg=COLORS["panel"], bd=0,
-                                        highlightthickness=0, takefocus=0)
-        self._select_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self._select_label = tk.Label(self, textvariable=variable, bg=COLORS["panel2"],
-                                      fg=COLORS["text"], anchor="w", padx=10,
-                                      font=("Segoe UI", 9), bd=0)
-        self._select_label.place(x=2, y=2, relwidth=1, width=-29, height=height - 4)
-        self._select_arrow = tk.Label(self, text="⌄", bg=COLORS["panel2"],
-                                      fg=COLORS["muted"], font=("Segoe UI", 12), bd=0)
-        self._select_arrow.place(relx=1, x=-27, y=2, width=24, height=height - 4)
-        self._select_menu = tk.Menu(self, tearoff=0, bg=COLORS["panel2"], fg=COLORS["text"],
-                                    activebackground="#2b4361", activeforeground=COLORS["white"],
-                                    relief="flat", bd=0, borderwidth=0,
-                                    font=("Segoe UI", 9), activeborderwidth=0)
-        for value in self._select_values:
-            self._select_menu.add_command(label=value, command=lambda selected=value: self._choose(selected))
-        for widget in (self, self._select_label, self._select_arrow, self._select_canvas):
-            widget.bind("<Button-1>", self._open_menu, add="+")
-            widget.bind("<Enter>", self._on_enter, add="+")
-            widget.bind("<Leave>", self._on_leave, add="+")
-        self.bind("<Configure>", self._draw_select, add="+")
-
-    def _draw_select(self, _event: Any = None) -> None:
-        w, h = max(10, self.winfo_width()), max(10, self.winfo_height())
-        self._select_canvas.delete("select")
-        outline = COLORS["blue"] if self._select_focused else COLORS["border"]
-        self._select_canvas.create_polygon(_rounded_points(1, 1, w - 1, h - 1, 10),
-                                           smooth=True, splinesteps=12, fill=COLORS["panel2"],
-                                           outline=outline, width=1, tags="select")
-        self._select_canvas.tag_lower("select")
-
-    def _on_enter(self, _event: Any = None) -> None:
-        self._select_focused = True
-        self._select_label.configure(fg=COLORS["white"])
-        self._select_arrow.configure(fg=COLORS["white"])
-        self._draw_select()
-
-    def _on_leave(self, _event: Any = None) -> None:
-        self._select_focused = False
-        self._select_label.configure(fg=COLORS["text"])
-        self._select_arrow.configure(fg=COLORS["muted"])
-        self._draw_select()
-
-    def _open_menu(self, _event: Any = None) -> None:
-        try:
-            self._select_menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
-        finally:
-            try:
-                self._select_menu.grab_release()
-            except tk.TclError:
-                pass
-
-    def _choose(self, value: str) -> None:
-        self._select_var.set(value)
-        if callable(self._select_command):
-            self._select_command(value)
 
 
 
@@ -852,7 +558,7 @@ class MarketRadarApp:
         window_h = min(780, max(660, screen_h - 70))
         root.geometry(f"{window_w}x{window_h}+{max(0, (screen_w-window_w)//2)}+{max(0, (screen_h-window_h)//4)}")
         root.minsize(min(1040, window_w), min(620, window_h))
-        root.configure(bg=COLORS["bg"])
+        root.configure(fg_color=COLORS["bg"])
         root.attributes("-topmost", True)
         self.closing = False
         self.refreshing = False
@@ -882,65 +588,110 @@ class MarketRadarApp:
         root.after(REFRESH_SECONDS*1000, self._auto_refresh_tick)
 
     def _setup_style(self) -> None:
+        """Style the remaining native Treeview and sash widgets to match CustomTkinter."""
         style = ttk.Style(self.root)
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
         style.configure("TFrame", background=COLORS["bg"])
-        style.configure("Panel.TFrame", background=COLORS["panel"])
-        style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI", 9))
-        style.configure("Title.TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI Semibold", 18, "bold"))
-        style.configure("Subtitle.TLabel", background=COLORS["bg"], foreground=COLORS["muted"], font=("Segoe UI", 9))
-        style.configure("Panel.Subtitle.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=("Segoe UI", 9))
-        style.configure("TButton", background=COLORS["panel2"], foreground=COLORS["text"], bordercolor=COLORS["border"], padding=(7, 5), font=("Segoe UI", 9), relief="flat")
-        style.map("TButton", background=[("pressed", "#324866"), ("active", "#2a3a50")], foreground=[("disabled", COLORS["muted"]), ("active", COLORS["white"])])
-        style.configure("TCheckbutton", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI", 9), padding=(2, 3))
-        style.map("TCheckbutton", background=[("active", COLORS["bg"])], foreground=[("active", COLORS["text"])])
-        style.configure("TEntry", fieldbackground=COLORS["panel2"], foreground=COLORS["text"], insertcolor=COLORS["text"], padding=(8, 6), borderwidth=0, relief="flat")
-        style.map("TEntry", fieldbackground=[("focus", COLORS["panel2"])], foreground=[("disabled", COLORS["muted"])])
-        style.configure("TCombobox", fieldbackground=COLORS["panel2"], background=COLORS["panel2"], foreground=COLORS["text"], arrowcolor=COLORS["text"], padding=(8, 5), borderwidth=0, relief="flat")
-        style.map("TCombobox", fieldbackground=[("readonly", COLORS["panel2"])], foreground=[("readonly", COLORS["text"])], selectbackground=[("readonly", COLORS["panel2"])], selectforeground=[("readonly", COLORS["text"])])
-        style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"], rowheight=28, borderwidth=0, relief="flat", font=("Segoe UI", 9), bordercolor=COLORS["panel"], lightcolor=COLORS["panel"], darkcolor=COLORS["panel"])
-        style.configure("Treeview.Heading", background=COLORS["panel2"], foreground=COLORS["text"], font=("Segoe UI Semibold", 9, "bold"), padding=(6, 8), relief="flat", bordercolor=COLORS["panel"], lightcolor=COLORS["panel"], darkcolor=COLORS["panel"])
-        style.map("Treeview.Heading", background=[("pressed", "#354b66"), ("active", "#293b51")], foreground=[("pressed", COLORS["white"]), ("active", COLORS["white"])], relief=[("pressed", "flat"), ("active", "flat")])
-        style.map("Treeview", background=[("selected", "#2b4361")], foreground=[("selected", COLORS["white"])], relief=[("focus", "flat")])
-        style.configure("TScrollbar", background=COLORS["panel2"], troughcolor=COLORS["bg"], arrowcolor=COLORS["muted"], bordercolor=COLORS["bg"], lightcolor=COLORS["panel2"], darkcolor=COLORS["bg"], relief="flat", width=11)
+        style.configure(
+            "Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"],
+            foreground=COLORS["text"], rowheight=28, borderwidth=0, relief="flat",
+            font=("Segoe UI", 9), bordercolor=COLORS["panel"],
+            lightcolor=COLORS["panel"], darkcolor=COLORS["panel"],
+        )
+        style.configure(
+            "Treeview.Heading", background=COLORS["panel2"], foreground=COLORS["text"],
+            font=("Segoe UI", 9, "bold"), padding=(6, 7), relief="flat",
+            bordercolor=COLORS["panel"], lightcolor=COLORS["panel"], darkcolor=COLORS["panel"],
+        )
+        style.map(
+            "Treeview.Heading",
+            background=[("pressed", "#354b66"), ("active", "#293b51")],
+            foreground=[("pressed", COLORS["white"]), ("active", COLORS["white"])],
+            relief=[("pressed", "flat"), ("active", "flat")],
+        )
+        style.map(
+            "Treeview", background=[("selected", "#2b4361")],
+            foreground=[("selected", COLORS["white"])], relief=[("focus", "flat")],
+        )
+        style.configure(
+            "TScrollbar", background=COLORS["panel2"], troughcolor=COLORS["panel"],
+            arrowcolor=COLORS["muted"], bordercolor=COLORS["panel"],
+            lightcolor=COLORS["panel2"], darkcolor=COLORS["panel"], relief="flat", width=10,
+        )
         style.map("TScrollbar", background=[("active", "#354b66"), ("pressed", "#405675")])
         style.configure("TPanedwindow", background=COLORS["bg"], relief="flat")
-        style.configure("Sash", sashthickness=7, gripcount=0, background=COLORS["border"], lightcolor=COLORS["bg"], darkcolor=COLORS["border"], bordercolor=COLORS["bg"], relief="flat")
+        style.configure(
+            "Sash", sashthickness=7, gripcount=0, background=COLORS["border"],
+            lightcolor=COLORS["bg"], darkcolor=COLORS["border"],
+            bordercolor=COLORS["bg"], relief="flat",
+        )
 
     def _build_ui(self) -> None:
-        header = ttk.Frame(self.root, padding=(16, 12, 16, 8))
-        header.pack(fill="x")
-        title_box = ttk.Frame(header)
+        header = ctk.CTkFrame(self.root, fg_color=COLORS["bg"], corner_radius=0)
+        header.pack(fill="x", padx=16, pady=(12, 7))
+        title_box = ctk.CTkFrame(header, fg_color="transparent", corner_radius=0)
         title_box.pack(side="left", fill="x", expand=True)
-        ttk.Label(title_box, text="MARKET RADAR", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(title_box, text="Crypto · Gold · Oil · US/Indonesia markets · rule-based market read", style="Subtitle.TLabel").pack(anchor="w", pady=(2, 0))
-        controls = ttk.Frame(header)
-        controls.pack(side="right", anchor="ne")
-        self.update_button = RoundedButton(controls, text="↻ Update now", command=self.refresh_data,
-            width=112, height=32, bg_color=COLORS["bg"], fill="#2d72c7", hover="#3986df",
-            text_color=COLORS["white"], border="#3d83d4", radius=10, font=("Segoe UI Semibold", 9, "bold"))
-        self.update_button.grid(row=0, column=0, padx=(0, 5), pady=(0, 4))
-        ttk.Checkbutton(controls, text="Always on top", variable=self.auto_top_var, command=self.toggle_topmost).grid(row=0, column=1, padx=4)
-        ttk.Checkbutton(controls, text="Start with Windows", variable=self.auto_start_var, command=self.toggle_autostart).grid(row=0, column=2, padx=4)
-        self.api_docs_button = RoundedButton(controls, text="API docs", command=lambda: webbrowser.open(INDODAX_DOCS),
-            width=82, height=32, bg_color=COLORS["bg"], fill=COLORS["panel2"], hover="#293b51", radius=10)
+        ctk.CTkLabel(
+            title_box, text="MARKET RADAR", text_color=COLORS["text"],
+            font=("Segoe UI", 20, "bold"), anchor="w", height=26,
+        ).pack(anchor="w", pady=0)
+        ctk.CTkLabel(
+            title_box, text="Crypto · Gold · Oil · US/Indonesia markets · rule-based market read",
+            text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w", height=16,
+        ).pack(anchor="w", pady=0)
+
+        controls = ctk.CTkFrame(header, fg_color="transparent", corner_radius=0)
+        controls.pack(side="right", anchor="ne", padx=(10, 0))
+        self.update_button = ctk.CTkButton(
+            controls, text="↻ Update now", command=self.refresh_data, width=112, height=32,
+            corner_radius=9, fg_color="#2d72c7", hover_color="#3986df",
+            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.update_button.grid(row=0, column=0, padx=(0, 5), pady=(0, 3))
+        ctk.CTkCheckBox(
+            controls, text="Always on top", variable=self.auto_top_var,
+            command=self.toggle_topmost, width=105, height=28, corner_radius=5,
+            checkbox_width=16, checkbox_height=16, border_color=COLORS["muted"],
+            fg_color="#2d72c7", hover_color="#3986df", text_color=COLORS["text"],
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=1, padx=4)
+        ctk.CTkCheckBox(
+            controls, text="Start with Windows", variable=self.auto_start_var,
+            command=self.toggle_autostart, width=132, height=28, corner_radius=5,
+            checkbox_width=16, checkbox_height=16, border_color=COLORS["muted"],
+            fg_color="#2d72c7", hover_color="#3986df", text_color=COLORS["text"],
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=2, padx=4)
+        self.api_docs_button = ctk.CTkButton(
+            controls, text="API docs", command=lambda: webbrowser.open(INDODAX_DOCS),
+            width=78, height=32, corner_radius=9, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 9),
+        )
         self.api_docs_button.grid(row=0, column=3, padx=(5, 0))
-        self.clock_label = ttk.Label(controls, text="WIB --:--:--", style="Subtitle.TLabel")
-        self.clock_label.grid(row=1, column=0, columnspan=4, sticky="e", pady=(5, 0))
+        self.clock_label = ctk.CTkLabel(
+            controls, text="WIB --:--:--", text_color=COLORS["muted"],
+            font=("Segoe UI", 9), anchor="e",
+        )
+        self.clock_label.grid(row=1, column=0, columnspan=4, sticky="e", pady=(2, 0))
 
         self.status_var = tk.StringVar(value="Menghubungkan ke sumber data publik…")
-        status_bar = RoundedSurface(self.root, fill=COLORS["panel2"], canvas_bg=COLORS["bg"],
-                                    border=COLORS["panel2"], radius=9, border_width=0, height=32)
+        status_bar = ctk.CTkFrame(
+            self.root, fg_color=COLORS["panel2"], corner_radius=9, height=32,
+        )
         status_bar.pack(fill="x", padx=16, pady=(0, 9))
         status_bar.pack_propagate(False)
-        tk.Label(status_bar, textvariable=self.status_var, bg=COLORS["panel2"], fg=COLORS["muted"],
-                 anchor="w", padx=13, font=("Segoe UI", 9)).pack(fill="both", expand=True, padx=6, pady=4)
+        ctk.CTkLabel(
+            status_bar, textvariable=self.status_var, text_color=COLORS["muted"],
+            font=("Segoe UI", 9), anchor="w",
+        ).pack(fill="both", expand=True, padx=13, pady=0)
 
-        cards = ttk.Frame(self.root, padding=(16, 0, 16, 10))
-        cards.pack(fill="x")
+        cards = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
+        cards.pack(fill="x", padx=16, pady=(0, 10))
         self.card_vars: dict[str, tk.StringVar] = {}
         card_specs = [
             ("BTC", "BITCOIN / IDR", COLORS["blue"]),
@@ -949,53 +700,94 @@ class MarketRadarApp:
             ("BZ=F", "BRENT CRUDE", COLORS["yellow"]),
         ]
         for i, (key, label, accent) in enumerate(card_specs):
-            cards.columnconfigure(i, weight=1, uniform="market_cards")
-            frame = RoundedSurface(cards, fill=COLORS["panel"], canvas_bg=COLORS["bg"],
-                                   border=COLORS["border"], radius=13, border_width=1, height=78)
+            cards.grid_columnconfigure(i, weight=1, uniform="market_cards")
+            frame = ctk.CTkFrame(
+                cards, fg_color=COLORS["panel"], corner_radius=12,
+                border_width=1, border_color=COLORS["border"], height=76,
+            )
             frame.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
-            tk.Label(frame, text=label, bg=COLORS["panel"], fg=accent,
-                     font=("Segoe UI", 8, "bold"), anchor="w").pack(anchor="w", padx=13, pady=(11, 3))
+            frame.grid_propagate(False)
+            ctk.CTkLabel(
+                frame, text=label, text_color=accent, font=("Segoe UI", 8, "bold"),
+                anchor="w",
+            ).pack(anchor="w", padx=13, pady=(9, 1))
             var = tk.StringVar(value="Loading…")
             self.card_vars[key] = var
-            tk.Label(frame, textvariable=var, bg=COLORS["panel"], fg=COLORS["text"],
-                     font=("Segoe UI Semibold", 13, "bold"), anchor="w").pack(anchor="w", padx=13, pady=(0, 10))
+            ctk.CTkLabel(
+                frame, textvariable=var, text_color=COLORS["text"],
+                font=("Segoe UI", 13, "bold"), anchor="w",
+            ).pack(anchor="w", padx=13, pady=(0, 7))
 
-        body = ttk.Frame(self.root, padding=(16, 0, 16, 12))
+        body = ttk.Frame(self.root, padding=(16, 0, 16, 10))
         body.pack(fill="both", expand=True)
+        # The only draggable divider is vertical on screen: it changes left/right widths.
         self.main_split = ttk.Panedwindow(body, orient="horizontal")
         self.main_split.pack(fill="both", expand=True)
+        # Keep native ttk shells as direct panes so Tk/ttk background detection remains correct.
+        left_shell = ttk.Frame(self.main_split)
+        right_shell = ttk.Frame(self.main_split)
+        self.main_split.add(left_shell, weight=4)
+        self.main_split.add(right_shell, weight=3)
+        left = ctk.CTkFrame(left_shell, fg_color=COLORS["bg"], corner_radius=0)
+        right = ctk.CTkFrame(right_shell, fg_color=COLORS["bg"], corner_radius=0)
+        left.pack(fill="both", expand=True)
+        right.pack(fill="both", expand=True)
 
-        left = ttk.Frame(self.main_split)
-        right = ttk.Frame(self.main_split)
-        self.main_split.add(left, weight=4)
-        self.main_split.add(right, weight=3)
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(0, weight=54, uniform="left_panels")
+        left.grid_rowconfigure(1, weight=46, uniform="left_panels")
+        crypto_panel = self._make_panel(left, "CRYPTO WATCHLIST · ALL INDODAX IDR PAIRS")
+        crypto_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
+        macro_panel = self._make_panel(left, "GLOBAL MARKETS · COMMODITIES, FX, INDICES & STOCKS")
+        macro_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 5), pady=(5, 0))
 
-        self.left_split = ttk.Panedwindow(left, orient="vertical")
-        self.left_split.pack(fill="both", expand=True, padx=(0, 6))
-        crypto_panel = self._make_panel(self.left_split, "CRYPTO WATCHLIST · ALL INDODAX IDR PAIRS")
-        macro_panel = self._make_panel(self.left_split, "GLOBAL MARKETS · COMMODITIES, FX, INDICES & STOCKS")
-        self.left_split.add(crypto_panel, weight=3)
-        self.left_split.add(macro_panel, weight=2)
-
-        crypto_toolbar = ttk.Frame(crypto_panel, style="Panel.TFrame")
-        crypto_toolbar.pack(fill="x", padx=10, pady=(0, 8))
-        self.crypto_search_entry = RoundedSearchField(crypto_toolbar, self.crypto_search_var,
-            width=218, height=34, placeholder="Search symbols or names…")
+        crypto_toolbar = ctk.CTkFrame(crypto_panel, fg_color="transparent", corner_radius=0)
+        crypto_toolbar.pack(fill="x", padx=10, pady=(0, 7))
+        self.crypto_search_entry = ctk.CTkEntry(
+            crypto_toolbar, width=180, height=32,
+            placeholder_text="Search symbols or names…", corner_radius=9,
+            fg_color=COLORS["panel2"], border_color=COLORS["border"],
+            text_color=COLORS["text"], placeholder_text_color=COLORS["muted"],
+            font=("Segoe UI", 9),
+        )
         self.crypto_search_entry.pack(side="left", padx=(0, 7))
+        self.crypto_search_entry.bind(
+            "<KeyRelease>", lambda _event: self.crypto_search_var.set(self.crypto_search_entry.get()), add="+"
+        )
+        self.crypto_search_entry.bind(
+            "<<Paste>>", lambda _event: self.root.after_idle(lambda: self.crypto_search_var.set(self.crypto_search_entry.get())), add="+"
+        )
         self.crypto_search_var.trace_add("write", lambda *_: self._render_crypto())
-        self.clear_search_button = RoundedButton(crypto_toolbar, text="Clear", command=lambda: self.crypto_search_var.set(""),
-            width=58, height=32, bg_color=COLORS["panel"], fill=COLORS["panel2"], hover="#293b51", radius=9)
-        self.clear_search_button.pack(side="left", padx=(0, 8))
-        self.crypto_filter_combo = RoundedSelect(crypto_toolbar, self.crypto_filter_var,
-            ("All assets", "Gainers", "Losers", "High volume"),
-            command=lambda _value: self._render_crypto(), width=132, height=32)
+        self.clear_search_button = ctk.CTkButton(
+            crypto_toolbar, text="Clear", command=self._clear_crypto_search,
+            width=50, height=30, corner_radius=8, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 9),
+        )
+        self.clear_search_button.pack(side="left", padx=(0, 7))
+        self.crypto_filter_combo = ctk.CTkOptionMenu(
+            crypto_toolbar, variable=self.crypto_filter_var,
+            values=["All assets", "Gainers", "Losers", "High volume"],
+            command=lambda _value: self._render_crypto(), width=118, height=30,
+            corner_radius=8, fg_color=COLORS["panel2"], button_color=COLORS["panel2"],
+            button_hover_color="#293b51", dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color="#293b51", text_color=COLORS["text"],
+            dropdown_text_color=COLORS["text"], font=("Segoe UI", 9),
+            dropdown_font=("Segoe UI", 9),
+        )
         self.crypto_filter_combo.pack(side="left")
         self.crypto_count_var = tk.StringVar(value="0 / 0")
-        ttk.Label(crypto_toolbar, textvariable=self.crypto_count_var, style="Panel.Subtitle.TLabel").pack(side="left", padx=(9, 0))
-        self.density_button = RoundedButton(crypto_toolbar, text="Compact rows", command=self.toggle_density,
-            width=104, height=30, bg_color=COLORS["panel"], fill=COLORS["panel2"], hover="#293b51", radius=9,
-            font=("Segoe UI", 8))
-        self.density_button.pack(side="right", padx=(8, 0))
+        ctk.CTkLabel(
+            crypto_toolbar, textvariable=self.crypto_count_var, text_color=COLORS["muted"],
+            font=("Segoe UI", 8),
+        ).pack(side="left", padx=(8, 0))
+        self.density_button = ctk.CTkButton(
+            crypto_toolbar, text="Compact rows", command=self.toggle_density,
+            width=91, height=29, corner_radius=8, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 8),
+        )
+        self.density_button.pack(side="right", padx=(7, 0))
 
         crypto_cols = ("asset", "price", "change", "volume_idr", "range", "asof", "setup")
         self.crypto_tree = ttk.Treeview(crypto_panel, columns=crypto_cols, show="headings", height=9)
@@ -1006,23 +798,44 @@ class MarketRadarApp:
             self.crypto_tree.column(column, width=self.crypto_widths[column], minwidth=48,
                                     stretch=(column in ("asset", "setup")), anchor="center")
         self._tags(self.crypto_tree)
-        crypto_y = ttk.Scrollbar(crypto_panel, orient="vertical", command=self.crypto_tree.yview)
-        crypto_x = ttk.Scrollbar(crypto_panel, orient="horizontal", command=self.crypto_tree.xview)
+        crypto_y = ctk.CTkScrollbar(
+            crypto_panel, orientation="vertical", command=self.crypto_tree.yview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", width=10, corner_radius=5,
+        )
+        crypto_x = ctk.CTkScrollbar(
+            crypto_panel, orientation="horizontal", command=self.crypto_tree.xview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", height=10, corner_radius=5,
+        )
         self.crypto_tree.configure(yscrollcommand=crypto_y.set, xscrollcommand=crypto_x.set)
         crypto_y.pack(side="right", fill="y", padx=(0, 7), pady=(0, 9))
-        crypto_x.pack(side="bottom", fill="x", padx=10, pady=(0, 9))
+        crypto_x.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
         self.crypto_tree.pack(fill="both", expand=True, padx=(10, 1), pady=(0, 1))
         self._update_crypto_headings()
 
-        macro_toolbar = ttk.Frame(macro_panel, style="Panel.TFrame")
-        macro_toolbar.pack(fill="x", padx=10, pady=(0, 8))
-        ttk.Label(macro_toolbar, text="Category", style="Panel.Subtitle.TLabel").pack(side="left", padx=(0, 7))
-        self.macro_category_combo = RoundedSelect(macro_toolbar, self.macro_category_var,
-            ("All markets", "Commodities", "FX", "Indices", "Stocks"),
-            command=lambda _value: self._render_macro(), width=152, height=32)
+        macro_toolbar = ctk.CTkFrame(macro_panel, fg_color="transparent", corner_radius=0)
+        macro_toolbar.pack(fill="x", padx=10, pady=(0, 7))
+        ctk.CTkLabel(
+            macro_toolbar, text="Category", text_color=COLORS["muted"],
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(0, 7))
+        self.macro_category_combo = ctk.CTkOptionMenu(
+            macro_toolbar, variable=self.macro_category_var,
+            values=["All markets", "Commodities", "FX", "Indices", "Stocks"],
+            command=lambda _value: self._render_macro(), width=140, height=30,
+            corner_radius=8, fg_color=COLORS["panel2"], button_color=COLORS["panel2"],
+            button_hover_color="#293b51", dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color="#293b51", text_color=COLORS["text"],
+            dropdown_text_color=COLORS["text"], font=("Segoe UI", 9),
+            dropdown_font=("Segoe UI", 9),
+        )
         self.macro_category_combo.pack(side="left")
         self.macro_count_var = tk.StringVar(value=f"{len(MACRO_ASSETS)} / {len(MACRO_ASSETS)} markets")
-        ttk.Label(macro_toolbar, textvariable=self.macro_count_var, style="Panel.Subtitle.TLabel").pack(side="left", padx=(9, 0))
+        ctk.CTkLabel(
+            macro_toolbar, textvariable=self.macro_count_var, text_color=COLORS["muted"],
+            font=("Segoe UI", 8),
+        ).pack(side="left", padx=(8, 0))
         macro_cols = ("asset", "price", "change", "technicals", "asof")
         self.macro_tree = ttk.Treeview(macro_panel, columns=macro_cols, show="headings", height=8)
         self.macro_headers = {"asset": "Market", "price": "Last", "change": "Daily", "technicals": "Trend / RSI", "asof": "Quote time (WIB)"}
@@ -1032,85 +845,122 @@ class MarketRadarApp:
             self.macro_tree.column(column, width=self.macro_widths[column], minwidth=50,
                                    stretch=(column in ("asset", "technicals")), anchor="center")
         self._tags(self.macro_tree)
-        macro_y = ttk.Scrollbar(macro_panel, orient="vertical", command=self.macro_tree.yview)
-        macro_x = ttk.Scrollbar(macro_panel, orient="horizontal", command=self.macro_tree.xview)
+        macro_y = ctk.CTkScrollbar(
+            macro_panel, orientation="vertical", command=self.macro_tree.yview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", width=10, corner_radius=5,
+        )
+        macro_x = ctk.CTkScrollbar(
+            macro_panel, orientation="horizontal", command=self.macro_tree.xview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", height=10, corner_radius=5,
+        )
         self.macro_tree.configure(yscrollcommand=macro_y.set, xscrollcommand=macro_x.set)
         macro_y.pack(side="right", fill="y", padx=(0, 7), pady=(0, 9))
-        macro_x.pack(side="bottom", fill="x", padx=10, pady=(0, 9))
+        macro_x.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
         self.macro_tree.pack(fill="both", expand=True, padx=(10, 1), pady=(0, 1))
         self._update_macro_headings()
 
-        self.right_split = ttk.Panedwindow(right, orient="vertical")
-        self.right_split.pack(fill="both", expand=True, padx=(6, 0))
-        analysis_panel = self._make_panel(self.right_split, "MARKET READ & ACTION CHECKLIST")
-        news_panel = self._make_panel(self.right_split, "GLOBAL HEADLINES · DOUBLE-CLICK TO OPEN")
-        self.right_split.add(analysis_panel, weight=3)
-        self.right_split.add(news_panel, weight=2)
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=58, uniform="right_panels")
+        right.grid_rowconfigure(1, weight=42, uniform="right_panels")
+        analysis_panel = self._make_panel(right, "MARKET READ & ACTION CHECKLIST")
+        analysis_panel.grid(row=0, column=0, sticky="nsew", padx=(5, 0), pady=(0, 5))
+        news_panel = self._make_panel(right, "GLOBAL HEADLINES · DOUBLE-CLICK TO OPEN")
+        news_panel.grid(row=1, column=0, sticky="nsew", padx=(5, 0), pady=(5, 0))
 
-        ai_controls = ttk.Frame(analysis_panel, style="Panel.TFrame")
-        ai_controls.pack(fill="x", padx=10, pady=(0, 7))
-        self.ai_settings_button = RoundedButton(ai_controls, text="AI Settings", command=self.open_ai_settings,
-            width=88, height=31, bg_color=COLORS["panel"], fill=COLORS["panel2"], hover="#293b51", radius=9)
+        ai_controls = ctk.CTkFrame(analysis_panel, fg_color="transparent", corner_radius=0)
+        ai_controls.pack(fill="x", padx=10, pady=(0, 6))
+        self.ai_settings_button = ctk.CTkButton(
+            ai_controls, text="AI Settings", command=self.open_ai_settings,
+            width=84, height=30, corner_radius=8, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 9),
+        )
         self.ai_settings_button.pack(side="left", padx=(0, 5))
-        self.ai_button = RoundedButton(ai_controls, text="Ask AI (manual)", command=self.run_ai_analysis,
-            width=117, height=31, bg_color=COLORS["panel"], fill="#2d72c7", hover="#3986df",
-            text_color=COLORS["white"], border="#3d83d4", radius=9, font=("Segoe UI", 9, "bold"))
+        self.ai_button = ctk.CTkButton(
+            ai_controls, text="Ask AI (manual)", command=self.run_ai_analysis,
+            width=116, height=30, corner_radius=8, fg_color="#2d72c7",
+            hover_color="#3986df", text_color=COLORS["white"], border_width=1,
+            border_color="#3d83d4", font=("Segoe UI", 9, "bold"),
+        )
         self.ai_button.pack(side="left", padx=(0, 8))
         self.ai_status_var = tk.StringVar(value=("AI siap · " + self.ai_model) if self.ai_key else "AI opsional · panggilan hanya saat tombol ditekan")
-        ttk.Label(ai_controls, textvariable=self.ai_status_var, style="Panel.Subtitle.TLabel", wraplength=190, justify="left").pack(side="left", fill="x", expand=True)
-        self.analysis_text = tk.Text(analysis_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
-            insertbackground=COLORS["text"], relief="flat", padx=13, pady=10,
-            font=("Segoe UI", 9), state="disabled", width=45, height=12, spacing1=2, spacing3=2,
-            borderwidth=0, highlightthickness=0, selectbackground="#2b4361", selectforeground=COLORS["white"])
-        self.analysis_text.tag_configure("section", font=("Segoe UI Semibold", 10, "bold"), foreground=COLORS["blue"], spacing1=7, spacing3=2)
-        self.analysis_text.tag_configure("conclusion", foreground=COLORS["text"], font=("Segoe UI Semibold", 9, "bold"), lmargin1=8, lmargin2=8, spacing1=2, spacing3=4)
+        ctk.CTkLabel(
+            ai_controls, textvariable=self.ai_status_var, text_color=COLORS["muted"],
+            wraplength=190, justify="left", anchor="w", font=("Segoe UI", 8),
+        ).pack(side="left", fill="x", expand=True)
+        self.analysis_text = tk.Text(
+            analysis_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
+            insertbackground=COLORS["text"], relief="flat", padx=12, pady=7,
+            font=("Segoe UI", 9), state="disabled", width=45, height=12,
+            spacing1=1, spacing3=1, borderwidth=0, highlightthickness=0,
+            selectbackground="#2b4361", selectforeground=COLORS["white"],
+        )
+        self.analysis_text.tag_configure("section", font=("Segoe UI", 10, "bold"), foreground=COLORS["blue"], spacing1=4, spacing3=1)
+        self.analysis_text.tag_configure("conclusion", foreground=COLORS["text"], font=("Segoe UI", 9, "bold"), lmargin1=8, lmargin2=8, spacing1=1, spacing3=2)
         self.analysis_text.tag_configure("note", foreground=COLORS["muted"], font=("Segoe UI", 8))
-        analysis_scroll = ttk.Scrollbar(analysis_panel, orient="vertical", command=self.analysis_text.yview)
-        analysis_scroll.pack(side="right", fill="y", padx=(0, 8), pady=(0, 10))
+        analysis_scroll = ctk.CTkScrollbar(
+            analysis_panel, orientation="vertical", command=self.analysis_text.yview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", width=10, corner_radius=5,
+        )
+        analysis_scroll.pack(side="right", fill="y", padx=(0, 8), pady=(0, 9))
         self.analysis_text.configure(yscrollcommand=analysis_scroll.set)
-        self.analysis_text.pack(fill="both", expand=True, padx=(10, 2), pady=(0, 9))
+        self.analysis_text.pack(fill="both", expand=True, padx=(10, 2), pady=(0, 8))
 
-        self.news_text = tk.Text(news_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
-            selectbackground="#2b4361", selectforeground=COLORS["white"], borderwidth=0,
-            highlightthickness=0, relief="flat", padx=10, pady=5, font=("Segoe UI", 9), width=45,
-            height=7, spacing1=1, spacing3=2, insertbackground=COLORS["text"])
-        self.news_text.tag_configure("news_meta", foreground=COLORS["muted"], font=("Segoe UI", 8), spacing1=1, spacing3=6)
-        self.news_text.tag_configure("news_title", foreground=COLORS["text"], font=("Segoe UI Semibold", 9, "bold"), spacing1=4)
+        self.news_text = tk.Text(
+            news_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
+            selectbackground="#2b4361", selectforeground=COLORS["white"],
+            borderwidth=0, highlightthickness=0, relief="flat", padx=9, pady=4,
+            font=("Segoe UI", 9), width=45, height=7, spacing1=1, spacing3=1,
+            insertbackground=COLORS["text"],
+        )
+        self.news_text.tag_configure("news_meta", foreground=COLORS["muted"], font=("Segoe UI", 8), spacing1=1, spacing3=3)
+        self.news_text.tag_configure("news_title", foreground=COLORS["text"], font=("Segoe UI", 9, "bold"), spacing1=2)
         self.news_text.tag_configure("news_empty", foreground=COLORS["muted"], font=("Segoe UI", 9))
-        news_scroll = ttk.Scrollbar(news_panel, orient="vertical", command=self.news_text.yview)
-        news_scroll.pack(side="right", fill="y", padx=(0, 8), pady=(0, 9))
+        news_scroll = ctk.CTkScrollbar(
+            news_panel, orientation="vertical", command=self.news_text.yview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", width=10, corner_radius=5,
+        )
+        news_scroll.pack(side="right", fill="y", padx=(0, 8), pady=(0, 5))
         self.news_text.configure(yscrollcommand=news_scroll.set, state="disabled")
-        self.news_text.pack(fill="both", expand=True, padx=(10, 2), pady=(0, 2))
-        self.news_footer = ttk.Label(news_panel, text="RSS dapat tertunda; cek tanggal dan sumber asli.", style="Panel.Subtitle.TLabel", wraplength=400)
-        self.news_footer.pack(anchor="w", padx=12, pady=(0, 10))
+        self.news_text.pack(fill="both", expand=True, padx=(10, 2), pady=(0, 1))
+        self.news_footer = ctk.CTkLabel(
+            news_panel, text="RSS dapat tertunda; cek tanggal dan sumber asli.",
+            text_color=COLORS["muted"], font=("Segoe UI", 8), wraplength=420,
+            anchor="w", justify="left",
+        )
+        self.news_footer.pack(anchor="w", padx=12, pady=(2, 7))
 
-        footer = ttk.Label(self.root, text="Public data only · AI is optional/manual · No trading or wallet access · Quotes may be delayed · Not financial advice",
-                           style="Subtitle.TLabel", anchor="w", padding=(16, 0, 16, 6))
-        footer.pack(fill="x")
+        ctk.CTkLabel(
+            self.root,
+            text="Public data only · AI is optional/manual · No trading or wallet access · Quotes may be delayed · Not financial advice",
+            text_color=COLORS["muted"], font=("Segoe UI", 8), anchor="w",
+        ).pack(fill="x", padx=16, pady=(0, 6))
         self.root.after(350, self._set_initial_sashes)
 
     def _set_initial_sashes(self) -> None:
-        """Choose useful first-run proportions; each sash remains freely draggable."""
+        """Set the initial left/right split; vertical panel dividers are intentionally absent."""
         if self.closing:
             return
         try:
             width = self.main_split.winfo_width()
-            height_left = self.left_split.winfo_height()
-            height_right = self.right_split.winfo_height()
             if width > 200:
                 self.main_split.sashpos(0, int(width * 0.57))
-            if height_left > 120:
-                self.left_split.sashpos(0, int(height_left * 0.54))
-            if height_right > 120:
-                self.right_split.sashpos(0, int(height_right * 0.58))
         except tk.TclError:
             pass
 
-    def _make_panel(self, parent: tk.Misc, title: str) -> RoundedSurface:
-        panel = RoundedSurface(parent, fill=COLORS["panel"], canvas_bg=COLORS["bg"],
-                               border=COLORS["border"], radius=13, border_width=1)
-        tk.Label(panel, text=title, bg=COLORS["panel"], fg=COLORS["muted"], anchor="w",
-                 font=("Segoe UI Semibold", 9, "bold")).pack(fill="x", padx=13, pady=(10, 7))
+    def _make_panel(self, parent: tk.Misc, title: str) -> ctk.CTkFrame:
+        panel = ctk.CTkFrame(
+            parent, fg_color=COLORS["panel"], border_color=COLORS["border"],
+            border_width=1, corner_radius=13,
+        )
+        ctk.CTkLabel(
+            panel, text=title, text_color=COLORS["muted"], anchor="w", height=18,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(fill="x", padx=13, pady=(7, 4))
         return panel
 
     def _tags(self,tree:ttk.Treeview)->None:
@@ -1144,6 +994,10 @@ class MarketRadarApp:
                 self.macro_sort_key, self.macro_sort_reverse = key, False
             self._update_macro_headings()
             self._render_macro()
+
+    def _clear_crypto_search(self) -> None:
+        self.crypto_search_entry.delete(0, "end")
+        self.crypto_search_var.set("")
 
     def toggle_density(self) -> None:
         self.comfortable_rows = not self.comfortable_rows
@@ -1385,70 +1239,106 @@ class MarketRadarApp:
                 webbrowser.open(url)
 
     def open_ai_settings(self)->None:
-        win=tk.Toplevel(self.root)
+        win = ctk.CTkToplevel(self.root)
         win.title("Market Radar · AI Settings")
         win.transient(self.root)
         win.resizable(False, False)
-        win.configure(bg=COLORS["bg"])
+        win.configure(fg_color=COLORS["bg"])
         win.grab_set()
-        win.geometry("560x420+140+100")
-        surface = RoundedSurface(win, fill=COLORS["panel"], canvas_bg=COLORS["bg"],
-                                 border=COLORS["border"], radius=14, border_width=1)
+        win.geometry("560x430")
+        surface = ctk.CTkFrame(
+            win, fg_color=COLORS["panel"], border_color=COLORS["border"],
+            border_width=1, corner_radius=14,
+        )
         surface.pack(fill="both", expand=True, padx=12, pady=12)
-        frame=tk.Frame(surface, bg=COLORS["panel"])
-        frame.pack(fill="both", expand=True, padx=18, pady=16)
-        tk.Label(frame, text="OpenRouter API key", bg=COLORS["panel"], fg=COLORS["text"],
-                 font=("Segoe UI Semibold", 12, "bold"), anchor="w").pack(anchor="w")
-        tk.Label(frame, text="Key disimpan terenkripsi oleh Windows, bukan di kode/GitHub.",
-                 bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 9),
-                 wraplength=470, justify="left", anchor="w").pack(anchor="w", pady=(4, 9))
-        RoundedButton(frame, text="Open OpenRouter key page",
-            command=lambda:webbrowser.open("https://openrouter.ai/settings/keys"),
-            width=190, height=32, bg_color=COLORS["panel"], fill=COLORS["panel2"],
-            hover="#293b51", radius=9).pack(anchor="w", pady=(0, 10))
+        frame = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        frame.pack(fill="both", expand=True, padx=18, pady=15)
+        ctk.CTkLabel(
+            frame, text="OpenRouter API key", text_color=COLORS["text"],
+            font=("Segoe UI", 12, "bold"), anchor="w", height=23,
+        ).pack(anchor="w", pady=0)
+        ctk.CTkLabel(
+            frame, text="Key disimpan terenkripsi oleh Windows, bukan di kode/GitHub.",
+            text_color=COLORS["muted"], font=("Segoe UI", 9), wraplength=470,
+            justify="left", anchor="w", height=18,
+        ).pack(anchor="w", pady=(1, 6))
+        ctk.CTkButton(
+            frame, text="Open OpenRouter key page",
+            command=lambda: webbrowser.open("https://openrouter.ai/settings/keys"),
+            width=190, height=31, corner_radius=8, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"],
+            border_width=1, border_color=COLORS["border"], font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(0, 9))
 
-        key_var=tk.StringVar()
-        key_field=RoundedSearchField(frame, key_var, width=474, height=36,
-                                     placeholder="Paste API key…", icon=False, show="•")
-        key_field.pack(fill="x", pady=(0, 12))
-        key_field.entry.focus_set()
-        tk.Label(frame, text="Model ID", bg=COLORS["panel"], fg=COLORS["text"],
-                 font=("Segoe UI Semibold", 10, "bold"), anchor="w").pack(anchor="w")
-        model_var=tk.StringVar(value=self.ai_model or DEFAULT_AI_MODEL)
-        model_field=RoundedSearchField(frame, model_var, width=474, height=36,
-            placeholder="Model ID (default: openrouter/free)", icon=False)
-        model_field.pack(fill="x", pady=(5, 8))
-        tk.Label(frame, text="AI hanya berjalan saat tombol Ask AI ditekan. Kuota/ketersediaan model gratis tetap terbatas.",
-                 bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI", 8),
-                 wraplength=470, justify="left", anchor="w").pack(anchor="w", pady=(0, 12))
-        buttons=tk.Frame(frame, bg=COLORS["panel"])
+        key_field = ctk.CTkEntry(
+            frame, height=35, placeholder_text="Paste API key…",
+            show="•", corner_radius=9, fg_color=COLORS["panel2"],
+            border_color=COLORS["border"], text_color=COLORS["text"],
+            placeholder_text_color=COLORS["muted"], font=("Segoe UI", 9),
+        )
+        key_field.pack(fill="x", pady=(0, 9))
+        key_field.focus_set()
+        ctk.CTkLabel(
+            frame, text="Model ID", text_color=COLORS["text"],
+            font=("Segoe UI", 10, "bold"), anchor="w", height=18,
+        ).pack(anchor="w", pady=0)
+        model_field = ctk.CTkEntry(
+            frame, height=35,
+            placeholder_text="Model ID (default: openrouter/free)",
+            corner_radius=9, fg_color=COLORS["panel2"], border_color=COLORS["border"],
+            text_color=COLORS["text"], placeholder_text_color=COLORS["muted"],
+            font=("Segoe UI", 9),
+        )
+        model_field.pack(fill="x", pady=(4, 7))
+        model_field.insert(0, self.ai_model or DEFAULT_AI_MODEL)
+        ctk.CTkLabel(
+            frame, text="AI hanya berjalan saat tombol Ask AI ditekan. Kuota/ketersediaan model gratis tetap terbatas.",
+            text_color=COLORS["muted"], font=("Segoe UI", 8), wraplength=470,
+            justify="left", anchor="w", height=32,
+        ).pack(anchor="w", pady=(0, 8))
+        buttons = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=0)
         buttons.pack(fill="x")
+
         def save()->None:
-            model=model_var.get().strip() or DEFAULT_AI_MODEL
-            key=key_var.get().strip()
+            model = model_field.get().strip() or DEFAULT_AI_MODEL
+            key = key_field.get().strip()
             try:
                 save_ai_settings(model, api_key=key or None)
-                self.ai_model,self.ai_key=load_ai_settings()
+                self.ai_model, self.ai_key = load_ai_settings()
                 self.ai_status_var.set("AI siap · " + self.ai_model if self.ai_key else "Model tersimpan · masukkan API key untuk mengaktifkan AI")
                 win.destroy()
             except Exception as exc:
-                messagebox.showerror(APP_NAME,f"Tidak bisa menyimpan pengaturan AI:\n{exc}",parent=win)
+                messagebox.showerror(APP_NAME, f"Tidak bisa menyimpan pengaturan AI:\n{exc}", parent=win)
+
         def remove_key()->None:
-            if not messagebox.askyesno(APP_NAME,"Hapus API key yang tersimpan di komputer ini?",parent=win): return
+            if not messagebox.askyesno(APP_NAME, "Hapus API key yang tersimpan di komputer ini?", parent=win):
+                return
             try:
-                save_ai_settings(model_var.get().strip() or DEFAULT_AI_MODEL, clear_key=True)
-                self.ai_model,self.ai_key=load_ai_settings()
+                save_ai_settings(model_field.get().strip() or DEFAULT_AI_MODEL, clear_key=True)
+                self.ai_model, self.ai_key = load_ai_settings()
                 self.ai_status_var.set("API key lokal dihapus" if not self.ai_key else "API key dari environment variable masih aktif")
                 win.destroy()
             except Exception as exc:
-                messagebox.showerror(APP_NAME,f"Tidak bisa menghapus key:\n{exc}",parent=win)
-        RoundedButton(buttons, text="Cancel", command=win.destroy, width=76, height=32,
-            bg_color=COLORS["panel"], fill=COLORS["panel2"], hover="#293b51", radius=9).pack(side="right")
-        RoundedButton(buttons, text="Remove saved key", command=remove_key, width=132, height=32,
-            bg_color=COLORS["panel"], fill=COLORS["panel2"], hover="#293b51", radius=9).pack(side="right", padx=(0, 6))
-        RoundedButton(buttons, text="Save", command=save, width=72, height=32,
-            bg_color=COLORS["panel"], fill="#2d72c7", hover="#3986df", text_color=COLORS["white"],
-            border="#3d83d4", radius=9, font=("Segoe UI Semibold", 9, "bold")).pack(side="right", padx=(0, 6))
+                messagebox.showerror(APP_NAME, f"Tidak bisa menghapus key:\n{exc}", parent=win)
+
+        ctk.CTkButton(
+            buttons, text="Cancel", command=win.destroy, width=76, height=31,
+            corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9),
+        ).pack(side="right")
+        ctk.CTkButton(
+            buttons, text="Remove saved key", command=remove_key, width=132, height=31,
+            corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9),
+        ).pack(side="right", padx=(0, 6))
+        ctk.CTkButton(
+            buttons, text="Save", command=save, width=72, height=31,
+            corner_radius=8, fg_color="#2d72c7", hover_color="#3986df",
+            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="right", padx=(0, 6))
 
     def run_ai_analysis(self)->None:
         if self.ai_busy: return
@@ -1476,19 +1366,43 @@ class MarketRadarApp:
         except tk.TclError: pass
 
     def _show_ai_result(self,result:str,error:bool)->None:
-        self.ai_busy=False
-        self.ai_button.configure(state="normal",text="Ask AI (manual)")
+        self.ai_busy = False
+        self.ai_button.configure(state="normal", text="Ask AI (manual)")
         self.ai_status_var.set("AI gagal · periksa pengaturan/kuota" if error else "AI selesai · tidak berjalan otomatis")
-        win=tk.Toplevel(self.root); win.title("Market Radar · AI Analysis"); win.geometry("720x560+120+80"); win.transient(self.root)
-        win.configure(bg=COLORS["bg"])
-        surface=RoundedSurface(win,fill=COLORS["panel"],canvas_bg=COLORS["bg"],border=COLORS["border"],radius=14,border_width=1)
-        surface.pack(fill="both",expand=True,padx=12,pady=12)
-        frame=tk.Frame(surface,bg=COLORS["panel"]); frame.pack(fill="both",expand=True,padx=10,pady=10)
-        output=tk.Text(frame,wrap="word",bg=COLORS["panel"],fg=COLORS["text"],insertbackground=COLORS["text"],relief="flat",padx=12,pady=10,font=("Segoe UI",10),borderwidth=0,highlightthickness=0,selectbackground="#2b4361",selectforeground=COLORS["white"])
-        scroll=ttk.Scrollbar(frame,orient="vertical",command=output.yview); output.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right",fill="y"); output.pack(fill="both",expand=True)
-        output.insert("1.0",result); output.configure(state="disabled")
-        RoundedButton(frame,text="Close",command=win.destroy,width=78,height=32,bg_color=COLORS["panel"],fill=COLORS["panel2"],hover="#293b51",radius=9).pack(anchor="e",pady=(8,0))
+        win = ctk.CTkToplevel(self.root)
+        win.title("Market Radar · AI Analysis")
+        win.geometry("720x560")
+        win.transient(self.root)
+        win.configure(fg_color=COLORS["bg"])
+        surface = ctk.CTkFrame(
+            win, fg_color=COLORS["panel"], border_color=COLORS["border"],
+            border_width=1, corner_radius=14,
+        )
+        surface.pack(fill="both", expand=True, padx=12, pady=12)
+        frame = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        output = tk.Text(
+            frame, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
+            insertbackground=COLORS["text"], relief="flat", padx=12, pady=10,
+            font=("Segoe UI", 10), borderwidth=0, highlightthickness=0,
+            selectbackground="#2b4361", selectforeground=COLORS["white"],
+        )
+        scroll = ctk.CTkScrollbar(
+            frame, orientation="vertical", command=output.yview,
+            fg_color=COLORS["panel"], button_color=COLORS["panel2"],
+            button_hover_color="#405675", width=10, corner_radius=5,
+        )
+        output.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        output.pack(fill="both", expand=True)
+        output.insert("1.0", result)
+        output.configure(state="disabled")
+        ctk.CTkButton(
+            frame, text="Close", command=win.destroy, width=78, height=31,
+            corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="e", pady=(8, 0))
 
     def toggle_topmost(self)->None:self.root.attributes("-topmost",bool(self.auto_top_var.get()))
 
@@ -1521,7 +1435,9 @@ class MarketRadarApp:
 
 
 def main()->None:
-    root=tk.Tk()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    root = ctk.CTk(fg_color=COLORS["bg"])
     MarketRadarApp(root)
     root.mainloop()
 
