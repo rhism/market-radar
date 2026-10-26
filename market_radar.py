@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.5.0"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -73,7 +73,33 @@ def find_key(mapping: dict[str, Any], target: str) -> str | None:
 
 
 def fmt_idr(value: float | None) -> str:
-    return "—" if value is None else "Rp" + f"{value:,.0f}".replace(",", ".")
+    """Format IDR prices without rounding sub-rupiah crypto prices to Rp0.
+
+    Larger IDR prices stay compact; values below Rp1 use up to four significant
+    digits (within a safe decimal-place cap). Indonesian separators are used.
+    """
+    numeric = num(value)
+    if numeric is None:
+        return "—"
+    if numeric == 0:
+        return "Rp0"
+
+    magnitude = abs(numeric)
+    if magnitude >= 1_000:
+        decimals = 0
+    elif magnitude >= 1:
+        decimals = 2
+    else:
+        decimals = min(12, max(2, 3 - math.floor(math.log10(magnitude))))
+
+    raw = f"{numeric:,.{decimals}f}"
+    if "." in raw:
+        whole, fraction = raw.split(".", 1)
+        fraction = fraction.rstrip("0")
+        raw = whole if not fraction else whole + "." + fraction
+    # Convert Python's en-US numeric separators to Indonesian formatting.
+    raw = raw.replace(",", "<GROUP>").replace(".", ",").replace("<GROUP>", ".")
+    return "Rp" + raw
 
 
 def fmt_pct(value: float | None) -> str:
@@ -331,17 +357,92 @@ def get_news() -> list[dict[str, Any]]:
     return list(unique.values())[:12]
 
 
+def quote_is_stale(data: dict[str, Any], max_age_seconds: int = 600) -> bool:
+    """Return True when the exchange timestamp is too old for an actionable read."""
+    stamp = data.get("market_time") if isinstance(data, dict) else None
+    if not isinstance(stamp, datetime):
+        return False
+    return (now_wib() - stamp).total_seconds() > max_age_seconds
+
+
+def trade_levels(data: dict[str, Any]) -> dict[str, float] | None:
+    """Return simple 24-hour reference levels; these are not candle-confirmed orders."""
+    low, high = num(data.get("low")), num(data.get("high"))
+    if low is None or high is None or high <= low:
+        return None
+    return {"low": low, "mid": low + (high - low) / 2, "high": high}
+
+
 def setup_label(data: dict[str, Any]) -> tuple[str, str]:
-    if not data or not data.get("available"): return "Data tidak tersedia", "neutral"
-    pct, pos = data.get("change_pct"), data.get("position")
-    if pct is None: return "Perubahan 24j tidak ada", "neutral"
-    if pos is not None and pos <= .16 and pct <= -3: return "Dekat low; tunggu reclaim", "negative"
-    if pos is not None and pos >= .82 and pct >= .5: return "Dekat high; hindari FOMO", "positive"
-    if pct >= 1.5: return "Momentum positif; cek retest", "positive"
-    if pct <= -3: return "Lemah; jangan tangkap jatuh", "negative"
-    if -.75 <= pct <= .75: return "Konsolidasi / netral", "neutral"
-    if pct > 0: return "Relatif kuat; tunggu setup", "positive"
-    return "Masih terkoreksi", "negative"
+    """Human-readable scan label based on the 24h change and position in its range."""
+    if not data or not data.get("available"):
+        return "Data tidak tersedia", "neutral"
+    pct = num(data.get("change_pct"))
+    levels = trade_levels(data)
+    pos = num(data.get("position"))
+    if pos is None and levels:
+        price = num(data.get("price"))
+        if price is not None:
+            pos = max(0.0, min(1.0, (price - levels["low"]) / (levels["high"] - levels["low"])))
+    if pct is None:
+        return "Data 24j belum lengkap", "neutral"
+    if pos is not None and pos <= .16 and pct <= -3:
+        return "Low 24j · tunggu pulih", "negative"
+    if pos is not None and pos >= .82 and pct >= .5:
+        return "High 24j · hindari FOMO", "positive"
+    if pct >= 1.5:
+        return "Naik kuat · tunggu retest", "positive"
+    if pct <= -3:
+        return "Tekanan jual · hati-hati", "negative"
+    if -.75 <= pct <= .75:
+        return "Datar · belum ada setup", "neutral"
+    if pct > 0:
+        return "Naik tipis · tunggu", "positive"
+    return "Turun · tunggu stabil", "negative"
+
+
+def asset_action(data: dict[str, Any]) -> tuple[str, str, str]:
+    """Return (action label, row color tag, explanation) without assuming a user's position.
+
+    BUY WATCH is conditional—not an immediate buy instruction. SELL REVIEW asks an
+    existing holder to compare the market to their own pre-defined risk plan; the app
+    has no position size, average entry price, or risk tolerance.
+    """
+    if not data or not data.get("available") or num(data.get("price")) is None:
+        return "NO DATA", "stale", "Harga tidak tersedia; jangan membuat keputusan dari quote kosong."
+    if quote_is_stale(data):
+        return "STALE / WAIT", "stale", "Quote lebih tua dari 10 menit; tunggu data yang lebih segar sebelum menilai setup."
+
+    pct = num(data.get("change_pct"))
+    if pct is None:
+        return "WAIT", "neutral", "Perubahan 24 jam belum tersedia; belum ada dasar untuk label aksi."
+    levels = trade_levels(data)
+    pos = num(data.get("position"))
+    if pos is None and levels:
+        price = num(data.get("price"))
+        if price is not None:
+            pos = max(0.0, min(1.0, (price - levels["low"]) / (levels["high"] - levels["low"])))
+
+    if pos is not None and pos <= .16 and pct <= -3:
+        return ("NO BUY", "negative",
+                "Harga dekat low 24 jam dan turun kuat. Jangan membeli hanya karena tampak murah; tunggu pulih dan retest bertahan. Pemegang lama perlu memeriksa stop pribadi, bukan panic sell otomatis.")
+    if pos is not None and pos >= .82 and pct >= .5:
+        return ("TP WATCH", "positive",
+                "Harga dekat high 24 jam. Entry baru berisiko mengejar harga; pemegang aset dapat mengevaluasi take-profit sebagian sesuai rencana.")
+    if pct <= -3:
+        return ("SELL REVIEW", "negative",
+                "Tekanan jual 24 jam cukup kuat. Jika sudah memegang aset, periksa apakah batas risiko/stop yang Anda tetapkan sudah terlanggar; ini bukan perintah jual otomatis.")
+    if pct >= 1.5:
+        return ("BUY WATCH", "positive",
+                "Momentum positif, tetapi jangan langsung mengejar harga. Pantau entry hanya setelah reclaim dan retest bertahan; konfirmasi candle belum diperiksa aplikasi.")
+    if pct > .75:
+        return ("HOLD / WATCH", "positive",
+                "Perubahan 24 jam positif tetapi belum cukup untuk sinyal entry. Pemegang dapat memantau rencana; calon pembeli sebaiknya menunggu konfirmasi.")
+    if pct < -.75:
+        return ("WAIT / RISK", "negative",
+                "Momentum 24 jam negatif. Tunggu harga stabil; jika sudah memegang aset, ikuti stop dan batas risiko yang ditetapkan sebelumnya.")
+    return ("HOLD / WAIT", "neutral",
+            "Perubahan 24 jam relatif datar. Belum ada setup yang jelas; pemegang pantau rencana, calon pembeli menunggu konfirmasi.")
 
 
 def market_analysis(crypto: dict[str, dict[str, Any]], macro: dict[str, dict[str, Any]]) -> str:
@@ -411,11 +512,52 @@ def market_analysis(crypto: dict[str, dict[str, Any]], macro: dict[str, dict[str
         lines.append("Sinyal campuran dengan beberapa tanda kehati-hatian. Tunggu konfirmasi.")
     else:
         lines.append("Belum terlihat sinyal risk-off yang kuat dari data ini. Tetap periksa quote dan tren.")
-    lines.extend(["", "CHECKLIST ENTRY",
-                  "• Jangan membeli hanya karena harga menyentuh low 24 jam.",
-                  "• Tunggu reclaim level dan retest yang bertahan; perubahan 24 jam saja tidak cukup.",
-                  "• Stop loss tidak menjamin harga eksekusi yang sama saat volatilitas tinggi.",
-                  "", "Readout berbasis aturan sederhana dan data publik — bukan ramalan pasti atau nasihat finansial personal."])
+
+    lines.extend([
+        "", "CARA MEMBACA AKSI",
+        "• BUY WATCH — kandidat untuk dipantau, bukan perintah beli sekarang. Tunggu reclaim + retest yang bertahan.",
+        "• HOLD / WATCH — relevan bagi pemegang aset; calon pembeli tetap menunggu entry yang terkonfirmasi.",
+        "• TP WATCH — harga dekat high 24 jam; pemegang boleh mengevaluasi ambil untung sebagian sesuai rencana.",
+        "• SELL REVIEW — periksa stop/rencana keluar jika tekanan berlanjut; bukan perintah jual otomatis.",
+        "• NO BUY / WAIT — jangan membeli hanya karena harga turun atau tampak murah.",
+        "• Reclaim = harga kembali naik melewati level pantau; retest = harga menguji level itu lagi lalu bertahan.",
+        "• Low/High 24j = harga terendah/tertinggi pada rentang 24 jam yang ditampilkan, bukan support/resistance pasti.",
+        "", "ENTRY / EXIT WATCHLIST · 3 ASET VOLUME IDR TERTINGGI",
+    ])
+    top = [
+        (symbol, row) for symbol, row in crypto.items()
+        if row.get("available") and num(row.get("price")) is not None
+        and not quote_is_stale(row) and trade_levels(row) is not None
+    ]
+    top.sort(key=lambda item: num(item[1].get("volume_idr")) or 0, reverse=True)
+    if not top:
+        lines.append("Belum ada quote crypto yang segar dengan rentang low–high lengkap untuk membuat level pantau.")
+    for symbol, row in top[:3]:
+        action, _tag, reason = asset_action(row)
+        levels = trade_levels(row)
+        lines.append(f"{symbol} · {action} — {reason}")
+        if not levels:
+            continue
+        if action == "BUY WATCH":
+            lines.append(f"  Entry bersyarat: tunggu reclaim + retest area tengah {fmt_idr(levels['mid'])}; invalidasi acuan di bawah low 24j {fmt_idr(levels['low'])}; target referensi high 24j {fmt_idr(levels['high'])}.")
+        elif action == "TP WATCH":
+            lines.append(f"  Jangan mengejar entry dekat puncak. High 24j {fmt_idr(levels['high'])} adalah area evaluasi TP; tengah range {fmt_idr(levels['mid'])} hanya referensi risiko.")
+        elif action == "SELL REVIEW":
+            lines.append(f"  Review stop pribadi; low 24j {fmt_idr(levels['low'])} menjadi referensi pantauan, bukan sell trigger otomatis.")
+        elif action == "NO BUY":
+            lines.append(f"  Tunggu harga pulih melewati tengah range {fmt_idr(levels['mid'])} dan retest bertahan; hindari entry saat tekanan jual masih kuat.")
+        else:
+            lines.append(f"  Belum ada entry aktif. Pantau tengah range {fmt_idr(levels['mid'])}; low/high 24j {fmt_idr(levels['low'])}–{fmt_idr(levels['high'])} hanya level referensi.")
+
+    lines.extend([
+        "", "CHECKLIST ENTRY & EXIT",
+        "• Entry: jangan buy hanya karena harga menyentuh low. Tunggu reclaim dan retest level pantau; data ringkas ini tidak memeriksa candle/volume intraday.",
+        "• Risiko: tentukan batas rugi sebelum masuk. Low 24 jam hanya referensi awal, bukan stop-loss yang teruji.",
+        "• Exit: evaluasi TP sebagian di area resistance/rencana target; pertimbangkan keluar bila invalidasi atau stop pribadi terlanggar.",
+        "• HOLD: bukan berarti wajib tahan. Tinjau lagi jika alasan awal membeli sudah tidak berlaku.",
+        "• App tidak mengetahui modal entry, ukuran posisi, atau toleransi risiko kamu; jadi tidak bisa menghitung profit/loss personal atau memutuskan sell untuk semua orang.",
+        "", "Readout berbasis aturan sederhana dan data publik — bukan ramalan pasti atau nasihat finansial personal.",
+    ])
     return "\n".join(lines)
 
 
@@ -789,15 +931,27 @@ class MarketRadarApp:
         )
         self.density_button.pack(side="right", padx=(7, 0))
 
-        crypto_cols = ("asset", "price", "change", "volume_idr", "range", "asof", "setup")
+        crypto_cols = ("asset", "price", "change", "volume_idr", "range", "asof", "setup", "action")
         self.crypto_tree = ttk.Treeview(crypto_panel, columns=crypto_cols, show="headings", height=9)
-        self.crypto_headers = {"asset": "Asset", "price": "Last IDR", "change": "24h", "volume_idr": "Vol 24h", "range": "Range", "asof": "Quote", "setup": "Market read"}
-        self.crypto_widths = {"asset": 100, "price": 120, "change": 54, "volume_idr": 76, "range": 52, "asof": 68, "setup": 118}
+        self.crypto_headers = {"asset": "Asset", "price": "Last IDR", "change": "24h", "volume_idr": "Vol 24h", "range": "Range", "asof": "Quote", "setup": "Market read", "action": "Action"}
+        # Compact enough for the default left pane; users can widen it with the main divider.
+        self.crypto_widths = {"asset": 96, "price": 104, "change": 50, "volume_idr": 66, "range": 48, "asof": 56, "setup": 144, "action": 94}
         for column in crypto_cols:
             self.crypto_tree.heading(column, text=self.crypto_headers[column], anchor="center", command=lambda key=column: self._toggle_sort("crypto", key))
-            self.crypto_tree.column(column, width=self.crypto_widths[column], minwidth=48,
+            self.crypto_tree.column(column, width=self.crypto_widths[column], minwidth=44,
                                     stretch=(column in ("asset", "setup")), anchor="center")
         self._tags(self.crypto_tree)
+        self.crypto_tree.bind("<<TreeviewSelect>>", lambda _event: self._update_crypto_plan())
+        self.crypto_plan_var = tk.StringVar(value="Pilih aset untuk melihat rencana entry/exit bersyarat.")
+        self.crypto_plan_label = ctk.CTkLabel(
+            crypto_panel, textvariable=self.crypto_plan_var, text_color=COLORS["muted"],
+            font=("Segoe UI", 9), anchor="w", justify="left", wraplength=640,
+            height=50,
+        )
+        self.crypto_plan_label.pack(fill="x", padx=11, pady=(0, 4))
+        # Bind to the containing panel, not CTkLabel: CTkLabel forwards Configure
+        # events to both its canvas and label, which can cause wraplength oscillation.
+        tk.Misc.bind(crypto_panel, "<Configure>", self._resize_crypto_plan_wrap, add="+")
         crypto_y = ctk.CTkScrollbar(
             crypto_panel, orientation="vertical", command=self.crypto_tree.yview,
             fg_color=COLORS["panel"], button_color=COLORS["panel2"],
@@ -1061,6 +1215,8 @@ class MarketRadarApp:
             self.status_var.set(f"Refresh dicek {retrieved.strftime('%d %b %Y %H:%M:%S WIB')} · INDODAX {count_crypto}/{len(CRYPTO_ASSETS)} aset · pasar global {count_macro}/{len(MACRO_ASSETS)} quote")
 
     def _render_crypto(self) -> None:
+        selected_before = self.crypto_tree.selection()
+        selected_symbol = selected_before[0] if selected_before else None
         for item in self.crypto_tree.get_children():
             self.crypto_tree.delete(item)
         rows = filter_crypto_assets(CRYPTO_ASSETS, self.crypto_data,
@@ -1079,42 +1235,98 @@ class MarketRadarApp:
                 dt = data.get("market_time")
                 return dt.timestamp() if dt else None
             if key == "setup": return setup_label(data)[0] if data.get("available") else None
+            if key == "action": return asset_action(data)[0] if data.get("available") else None
             return None
 
         rows = self._sort_valid_and_missing(rows, value_for, self.crypto_sort_reverse)
         self.crypto_count_var.set(f"{len(rows):,}/{len(CRYPTO_ASSETS):,}")
         if not rows:
-            self.crypto_tree.insert("", "end", values=("No matching assets", "—", "—", "—", "—", "—", "Try another search/filter"), tags=("neutral",))
+            self.crypto_tree.insert("", "end", values=("No matching assets", "—", "—", "—", "—", "—", "Try another search/filter", "—"), tags=("neutral",))
+            self.crypto_plan_var.set("Tidak ada aset yang cocok dengan pencarian/filter saat ini.")
             return
         for symbol, name in rows:
             data = self.crypto_data.get(symbol, {})
             if not data.get("available"):
-                values = (f"{symbol} · {name}", "N/A", "—", fmt_volume_idr(data.get("volume_idr")), "—", "—", "Data tidak tersedia")
+                values = (f"{symbol} · {name}", "N/A", "—", fmt_volume_idr(data.get("volume_idr")), "—", "—", "Data tidak tersedia", "NO DATA")
                 self.crypto_tree.insert("", "end", iid=symbol, values=values, tags=("stale",))
                 continue
-            setup, tag = setup_label(data)
-            # The table is a scan-first view; keep the wording short while the
-            # Market Read panel retains the full rule-based context.
-            setup_display = {
-                "Momentum positif; cek retest": "Positif · tunggu retest",
-                "Lemah; jangan tangkap jatuh": "Lemah · jangan buru-buru",
-                "Konsolidasi / netral": "Konsolidasi",
-                "Relatif kuat; tunggu setup": "Kuat · tunggu setup",
-                "Dekat low; tunggu reclaim": "Low · tunggu reclaim",
-                "Dekat high; hindari FOMO": "High · hindari FOMO",
-                "Perubahan 24j tidak ada": "Data 24j belum ada",
-                "Masih terkoreksi": "Masih terkoreksi",
-                "Data tidak tersedia": "Data tidak tersedia",
-            }.get(setup, setup)
-            pos = data.get("position")
+            setup, setup_tag = setup_label(data)
+            action, action_tag, _reason = asset_action(data)
+            pos = num(data.get("position"))
             dt = data.get("market_time")
             asof = dt.strftime("%H:%M:%S") if dt else "fetch time"
+            row_tag = action_tag if action_tag in ("positive", "negative", "neutral", "stale") else setup_tag
             if dt and (now_wib() - dt).total_seconds() > 600:
                 asof += " stale"
-                tag = "stale"
-            values = (f"{symbol} · {name}", fmt_idr(data.get("price")), fmt_pct(data.get("change_pct")),
-                      fmt_volume_idr(data.get("volume_idr")), f"{pos * 100:.0f}%" if pos is not None else "—", asof, setup_display)
-            self.crypto_tree.insert("", "end", iid=symbol, values=values, tags=(tag,))
+                row_tag = "stale"
+                action = "STALE / WAIT"
+            values = (
+                f"{symbol} · {name}", fmt_idr(data.get("price")), fmt_pct(data.get("change_pct")),
+                fmt_volume_idr(data.get("volume_idr")), f"{pos * 100:.0f}%" if pos is not None else "—",
+                asof, setup, action,
+            )
+            self.crypto_tree.insert("", "end", iid=symbol, values=values, tags=(row_tag,))
+
+        # Preserve the selected symbol across refreshes; fall back to the first visible row.
+        children = self.crypto_tree.get_children()
+        if selected_symbol and self.crypto_tree.exists(selected_symbol):
+            self.crypto_tree.selection_set(selected_symbol)
+        elif children:
+            self.crypto_tree.selection_set(children[0])
+        self._update_crypto_plan()
+
+    def _resize_crypto_plan_wrap(self, event: Any) -> None:
+        """Keep the selected-asset details wrapping inside the resizable left pane."""
+        try:
+            target = max(260, int(event.width) - 22)
+            current = int(self.crypto_plan_label.cget("wraplength"))
+            if abs(current - target) > 12:
+                self.crypto_plan_label.configure(wraplength=target)
+        except (AttributeError, tk.TclError, TypeError, ValueError):
+            pass
+
+    def _update_crypto_plan(self) -> None:
+        """Show conditional entry/risk/target references for the selected crypto row."""
+        if not hasattr(self, "crypto_plan_var") or not hasattr(self, "crypto_tree"):
+            return
+        selected = self.crypto_tree.selection()
+        symbol = selected[0] if selected else None
+        if not symbol:
+            children = self.crypto_tree.get_children()
+            symbol = children[0] if children else None
+        if not symbol or symbol not in self.crypto_data:
+            self.crypto_plan_var.set("Pilih aset yang memiliki data untuk melihat rencana entry/exit bersyarat.")
+            return
+        data = self.crypto_data.get(symbol, {})
+        action, _tag, reason = asset_action(data)
+        levels = trade_levels(data)
+        if action in ("NO DATA", "STALE / WAIT"):
+            self.crypto_plan_var.set(f"{symbol} · {action} — {reason}")
+            return
+        if levels is None:
+            self.crypto_plan_var.set(f"{symbol} · {action} — {reason} Rentang 24 jam belum lengkap; level entry/exit tidak dihitung.")
+            return
+        low, mid, high = levels["low"], levels["mid"], levels["high"]
+        short_reason = {
+            "TP WATCH": "Dekat puncak 24j; entry baru rawan FOMO.",
+            "SELL REVIEW": "Tekanan jual kuat; periksa stop pribadi, jangan sell otomatis.",
+            "BUY WATCH": "Momentum naik; tunggu retest, bukan buy langsung.",
+            "NO BUY": "Dekat dasar 24j dan turun; jangan buru-buru menangkap harga.",
+            "HOLD / WATCH": "Naik moderat; pantau konfirmasi.",
+            "WAIT / RISK": "Perubahan negatif; tunggu stabil.",
+            "HOLD / WAIT": "Pergerakan datar; belum ada setup.",
+        }.get(action, reason)
+        if action == "TP WATCH":
+            plan = f"Entry baru: hindari FOMO. Area evaluasi TP referensi: high 24j {fmt_idr(high)}; tengah range {fmt_idr(mid)} hanya acuan risiko."
+        elif action == "SELL REVIEW":
+            plan = f"Entry baru: tunggu stabil. Review stop pribadi; low 24j {fmt_idr(low)} bukan sell otomatis."
+        elif action == "BUY WATCH":
+            plan = f"Entry bersyarat: reclaim + retest area tengah {fmt_idr(mid)}; invalidasi acuan di bawah low 24j {fmt_idr(low)}; target referensi high 24j {fmt_idr(high)}."
+        elif action == "NO BUY":
+            plan = f"Tunggu pulih + retest area tengah {fmt_idr(mid)}; low 24j {fmt_idr(low)} jadi referensi risiko; high 24j {fmt_idr(high)} referensi atas."
+        else:
+            plan = f"Belum ada entry aktif. Pantau tengah range {fmt_idr(mid)}; invalidasi acuan low 24j {fmt_idr(low)}; target referensi high 24j {fmt_idr(high)}."
+        self.crypto_plan_var.set(f"{symbol} · {action} — {short_reason} {plan} Level dari range 24j, bukan order otomatis.")
 
     def _macro_price(self,d:dict[str,Any])->str:
         p=d.get("price")
@@ -1190,7 +1402,7 @@ class MarketRadarApp:
         self.analysis_text.configure(state="normal")
         self.analysis_text.delete("1.0", "end")
         content = market_analysis(self.crypto_data, self.macro_data)
-        section_names = {"RINGKASAN PASAR", "KONTEKS GLOBAL", "SINYAL YANG PERLU DIPERHATIKAN", "KESIMPULAN", "CHECKLIST ENTRY"}
+        section_names = {"RINGKASAN PASAR", "KONTEKS GLOBAL", "SINYAL YANG PERLU DIPERHATIKAN", "KESIMPULAN", "CARA MEMBACA AKSI", "ENTRY / EXIT WATCHLIST · 3 ASET VOLUME IDR TERTINGGI", "CHECKLIST ENTRY & EXIT"}
         for line in content.splitlines(True):
             start = self.analysis_text.index("end-1c")
             self.analysis_text.insert("end", line)
@@ -1198,7 +1410,7 @@ class MarketRadarApp:
             finish = self.analysis_text.index("end-1c")
             if text in section_names:
                 self.analysis_text.tag_add("section", start, finish)
-            elif text.startswith("Bias waspada") or text.startswith("Sinyal campuran") or text.startswith("Belum terlihat sinyal") or text.startswith("Data komoditas/indeks belum berhasil"):
+            elif text.startswith(("Bias waspada", "Sinyal campuran", "Belum terlihat sinyal", "Data komoditas/indeks belum berhasil", "BUY WATCH", "HOLD / WATCH", "TP WATCH", "SELL REVIEW", "NO BUY / WAIT")):
                 self.analysis_text.tag_add("conclusion", start, finish)
             elif text.startswith("Readout berbasis aturan"):
                 self.analysis_text.tag_add("note", start, finish)
