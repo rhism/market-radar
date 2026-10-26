@@ -1,17 +1,15 @@
 # Market Radar — Windows Desktop Dashboard
 
-**Market Radar v1.2.0** is a lightweight Windows dashboard for public crypto and global-market data, with rule-based context and optional manual AI analysis. **It does not trade, connect to exchange accounts, or access wallets.**
+**Market Radar v1.3.0** is a lightweight Windows dashboard for public crypto and global-market data, with rule-based context and optional manual AI analysis. **It does not trade, connect to exchange accounts, or access wallets.**
 
-## What's new in v1.2.0
+## What's new in v1.3.0
 
-- **Find crypto pairs instantly** by symbol, coin name, or an IDR-pair alias. Search works locally on data already loaded; typing does not call the API.
-- **Quick crypto filters:** `All assets`, `Gainers`, `Losers`, and `High volume`. High volume shows the upper quartile of pairs with volume data.
-- **Sortable tables:** click a column header to sort ascending; click it again to reverse. An arrow shows the current sort direction. Missing values remain at the bottom.
-- **24-hour IDR volume** appears beside price and change, and the initial crypto order remains highest volume first.
-- **Global-market category filter:** show all markets, commodities, FX, indices, or stocks.
-- **Safer header hover/pressed colors** and a selectable compact/comfortable row density.
-- **More readable market read and headlines:** clear section headings, a more conventional UI font, wrapped headlines, and source/publication-time metadata when provided by RSS.
-- Existing refresh behavior, quote freshness labels, positive/negative/neutral table colors, AI settings, encrypted local API-key storage, always-on-top, and Windows startup options are retained.
+- **Modern, minimal styling:** rounded cards and panels, a dark rounded search field with a search glyph and focus ring, softly rounded action buttons, and matching dark dropdown menus.
+- **Drag-to-resize layout:** drag the vertical divider to give more room to tables or analysis, and drag the horizontal dividers to resize crypto/global-market tables and market-read/headline panels independently.
+- **Consistent table alignment:** all values and column headings are centered, with narrower default columns to reduce avoidable horizontal scrolling while keeping full IDR prices visible.
+- **Quieter controls:** scrollbar troughs match the dashboard, focus/hover states use a restrained blue accent, and cards use small color accents rather than heavy borders.
+- **All v1.2.0 features remain:** local crypto search, `All assets`/`Gainers`/`Losers`/`High volume` filters, sortable columns, 24-hour IDR volume, global-market category filtering, compact/comfortable row density, wrapped headlines, and the original rule-based market context.
+- No third-party Python package was added. The `.bat` launchers and `requirements.txt` are unchanged for this UI update.
 
 ## Features
 
@@ -26,13 +24,17 @@
 
 ### Crypto
 
-Use **Search** to find an asset by name or symbol. The search is local and does not trigger additional network calls. Choose a quick filter next to it. `Compact rows` / `Comfortable rows` changes the height of both tables. Click any heading to sort; click the same heading again to reverse direction.
+Use **Search** to find an asset by name or symbol. The search is local and does not trigger additional network calls. Choose a quick filter next to it. `Compact rows` / `Comfortable rows` changes the height of both tables. Click any heading to sort; click the same heading again to reverse direction. The table uses short readout labels for quick scanning; the right-side Market Read panel contains the fuller context.
 
 `Vol 24h IDR` is shown in compact units (`K`, `M`, `B`, `T`) so high-volume pairs fit the table. The quote timestamp is retained where the source provides one; `stale` means the quote may not reflect a current market session.
 
 ### Global markets
 
 Select a category to narrow the 14 configured instruments. Click table headings to sort by market, last price, daily change, technicals, or quote time. Stock/futures data follows each instrument's market hours.
+
+## Resize the dashboard
+
+The main vertical handle separates the left-side market tables from the right-side analysis panels. The two horizontal handles independently resize the crypto/global-market tables and the market-read/headline panels. Drag a handle with the mouse to allocate more room where you need it. Both tables keep centered column headings and values; some long readout text can still be clipped in a narrow panel, so widen the relevant pane when needed.
 
 ## Install and run
 
@@ -85,4 +87,4 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 
 > Preview note: this screenshot uses synthetic layout-test values; figures shown are not live market quotes.
 
-![Market Radar v1.2.0 desktop preview](market-radar-preview.png)
+![Market Radar v1.3.0 desktop preview](market-radar-preview.png)
