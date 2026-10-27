@@ -148,6 +148,4 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 
 > Preview note: this screenshot uses synthetic layout-test values; figures shown are not live market quotes.
 
-> The repository preview image is from an older layout. Replace it with a fresh screenshot after checking v1.6.2 on Windows.
-
 ![Market Radar desktop preview](market-radar-preview.png)
