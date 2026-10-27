@@ -149,3 +149,28 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 > Preview note: this screenshot uses synthetic layout-test values; figures shown are not live market quotes.
 
 ![Market Radar desktop preview](market-radar-preview.png)
+
+
+## Historical backtest (research tool, separate from the app)
+
+A standalone offline/online research script is available as `backtest.py`. It does **not** modify or run inside the desktop app, and does not place orders. It downloads closed 1-hour OHLC history from INDODAX in bounded 14-day chunks, evaluates the technical rules using only candles available at each signal close, and simulates fills at the **next candle open**. This avoids entering at the same close that created the signal.
+
+From PowerShell in the project directory:
+
+```powershell
+python backtest.py --days 90 --symbols BTC,ETH,SOL,XRP,SUI,QNT,ASTER,ALT --fee-bps 30 --slippage-bps 10 --output backtest_results.json
+```
+
+The default starting capital is Rp10,000,000 **per asset**. Fee and slippage values are configurable estimates in basis points per side (30 bps = 0.30%; 10 bps = 0.10%). Check the fee schedule for your own account and rerun with realistic assumptions. The JSON report includes net profit after modeled costs, win rate, profit factor, maximum drawdown, and individual trades per asset. The default history window is 90 days; the script accepts 1–730 days, subject to what INDODAX actually returns. It records per-symbol data errors instead of silently treating missing history as a successful result.
+
+**Important limitations before interpreting the report:**
+- Historical bid/ask spread and the app's live quote-freshness checks cannot be reconstructed from OHLC alone; the live spread gate is therefore not reproduced.
+- The 24-hour IDR turnover gate is estimated from candle volume × close. Confirm the volume units from returned data before trusting this filter.
+- The script is a transparent technical-rule proxy, not a perfect replay of every live-app condition. Do not use its results as a promise or prediction of future profit.
+- A backtest with too few trades, a short period, or one market regime is weak evidence. Inspect per-asset trade logs and test different periods/cost assumptions before considering changes to live BUY/SELL rules.
+
+Run the existing application tests and the new backtest tests without launching the GUI:
+
+```powershell
+python -m unittest -v test_market_radar.py test_ai_modes.py test_backtest.py
+```
