@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -26,7 +26,9 @@ DEFAULT_AI_MODEL = "openrouter/free"
 INDODAX_DOCS = "https://github.com/btcid/indodax-official-api-docs"
 YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3mo&interval=1d"
 REFRESH_SECONDS, MACRO_REFRESH_SECONDS, NEWS_REFRESH_SECONDS = 90, 300, 900
+NEWS_RETRY_SECONDS = 60
 HTTP_TIMEOUT = 12
+NEWS_DIAGNOSTIC = "Belum ada percobaan RSS."
 CRYPTO_ASSETS: list[tuple[str, str]] = []  # loaded dynamically from INDODAX
 MACRO_ASSETS = [
     ("GC=F", "Gold futures", "USD/oz", "commodity"),
@@ -340,21 +342,79 @@ def get_macro_data() -> dict[str, dict[str, Any]]:
 
 
 def get_news() -> list[dict[str, Any]]:
-    collected = []
-    for query in ("US Iran oil Strait of Hormuz markets", "Bitcoin cryptocurrency market selloff"):
-        url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q":query,"hl":"en-US","gl":"US","ceid":"US:en"})
+    """Fetch and parse Google News RSS, retaining a short diagnostic for the UI.
+
+    Use a normal browser-like User-Agent and match RSS elements by local tag name,
+    so harmless namespace differences do not silently produce an empty list.
+    """
+    global NEWS_DIAGNOSTIC
+    collected: list[dict[str, Any]] = []
+    feed_results: list[str] = []
+    queries = (
+        "US Iran oil Strait of Hormuz markets",
+        "Bitcoin cryptocurrency market selloff",
+    )
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/130.0.0.0 Safari/537.36"),
+        "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
+        "Accept-Language": "en-US,en;q=0.8",
+    }
+
+    def child_text(element: ET.Element, wanted: str) -> str:
+        for child in list(element):
+            if child.tag.rsplit("}", 1)[-1].lower() == wanted.lower():
+                text = (child.text or "").strip()
+                if text:
+                    return text
+                # Atom-style feeds put the link in an href attribute.
+                if wanted.lower() == "link":
+                    return (child.attrib.get("href") or "").strip()
+        return ""
+
+    for query in queries:
+        url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
+            "q": query, "hl": "en-US", "gl": "US", "ceid": "US:en",
+        })
         try:
-            req = urllib.request.Request(url, headers={"User-Agent":f"MarketRadar/{APP_VERSION}"})
-            with urllib.request.urlopen(req, timeout=8) as resp: raw = resp.read(1_000_000)
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                status = getattr(resp, "status", 200)
+                raw = resp.read(1_000_000)
+            if not raw.strip():
+                feed_results.append(f"HTTP {status}, respons kosong")
+                continue
             root = ET.fromstring(raw)
-            for item in root.findall("./channel/item"):
-                title, link = (item.findtext("title") or "").strip(), (item.findtext("link") or "").strip()
+            feed_items = [el for el in root.iter() if el.tag.rsplit("}", 1)[-1].lower() == "item"]
+            if not feed_items:
+                feed_results.append(f"HTTP {status}, tidak ada item RSS")
+                continue
+            before = len(collected)
+            for item in feed_items:
+                title = child_text(item, "title")
+                link = child_text(item, "link")
                 if title and link:
-                    collected.append({"title":title,"link":link,"pubDate":item.findtext("pubDate") or "",
-                                      "source":item.findtext("source") or "News"})
-        except Exception: pass
-    unique = {x["link"]:x for x in collected}
-    return list(unique.values())[:12]
+                    collected.append({
+                        "title": title, "link": link,
+                        "pubDate": child_text(item, "pubDate") or child_text(item, "published"),
+                        "source": child_text(item, "source") or "Google News",
+                    })
+            feed_results.append(f"{len(collected) - before} headline terbaca")
+        except Exception as exc:
+            # Keep the actual reason visible instead of silently swallowing it.
+            reason = str(exc).replace("\n", " ").strip() or type(exc).__name__
+            feed_results.append(f"{type(exc).__name__}: {reason[:100]}")
+
+    unique: dict[str, dict[str, Any]] = {}
+    for item in collected:
+        unique.setdefault(item["link"], item)
+    items = list(unique.values())[:12]
+    if items:
+        NEWS_DIAGNOSTIC = f"Google News RSS · {len(items)} headline berhasil dimuat."
+    else:
+        NEWS_DIAGNOSTIC = "RSS tidak menghasilkan headline · " + " | ".join(feed_results)
+    return items
 
 
 def quote_is_stale(data: dict[str, Any], max_age_seconds: int = 600) -> bool:
@@ -1236,7 +1296,9 @@ class MarketRadarApp:
         self.refreshing=True; self.update_button.configure(state="disabled",text="Loading…")
         self.status_var.set("Memperbarui INDODAX, komoditas, indeks, saham dan headline…")
         need_macro=(time.monotonic()-self.last_macro_fetch>=MACRO_REFRESH_SECONDS) or not self.macro_data
-        need_news=(time.monotonic()-self.last_news_fetch>=NEWS_REFRESH_SECONDS)
+        # Retry an empty/failed feed sooner, but do not hammer RSS on every UI refresh.
+        news_interval = NEWS_REFRESH_SECONDS if self.news_data else NEWS_RETRY_SECONDS
+        need_news = (time.monotonic() - self.last_news_fetch >= news_interval)
         threading.Thread(target=self._refresh_worker,args=(need_macro,need_news),daemon=True).start()
 
     def _refresh_worker(self,need_macro:bool,need_news:bool)->None:
@@ -1471,8 +1533,10 @@ class MarketRadarApp:
         self.news_text.configure(state="normal")
         self.news_text.delete("1.0", "end")
         if not self.news_data:
-            self.news_text.insert("end", "Headline belum tersedia. Periksa koneksi RSS.\n", ("news_empty",))
-            self.news_footer.configure(text="Feed berita opsional. Kegagalan feed tidak memengaruhi harga market.")
+            self.news_text.insert("end", "Headline belum berhasil dimuat. Aplikasi akan mencoba lagi otomatis.\n", ("news_empty",))
+            diagnostic = NEWS_DIAGNOSTIC.replace("\n", " ").strip()
+            self.news_text.insert("end", f"\nStatus RSS: {diagnostic or 'Belum ada detail dari sumber.'}\n", ("news_empty",))
+            self.news_footer.configure(text=f"Percobaan ulang otomatis jika feed kosong; interval normal {NEWS_REFRESH_SECONDS // 60} menit.")
             self.news_text.configure(state="disabled")
             return
         for index, item in enumerate(self.news_data[:12]):
@@ -1493,7 +1557,7 @@ class MarketRadarApp:
             self.news_text.tag_bind(tag, "<Enter>", lambda _event: self.news_text.configure(cursor="hand2"))
             self.news_text.tag_bind(tag, "<Leave>", lambda _event: self.news_text.configure(cursor="xterm"))
         self.news_text.configure(state="disabled")
-        self.news_footer.configure(text="Double-click headline untuk membuka artikel · waktu publikasi mengikuti sumber RSS.")
+        self.news_footer.configure(text=f"{NEWS_DIAGNOSTIC} Double-click headline untuk membuka artikel; waktu publikasi mengikuti RSS.")
 
     def open_news_item(self, index: int) -> None:
         if 0 <= index < len(self.news_data):

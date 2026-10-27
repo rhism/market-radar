@@ -1,6 +1,6 @@
 # Market Radar — Windows Desktop Dashboard
 
-**Market Radar v1.7.0** is a lightweight Windows dashboard for public crypto and global-market data, with rule-based context and optional manual AI analysis. **It does not trade, connect to exchange accounts, or access wallets.**
+**Market Radar v1.7.1** is a lightweight Windows dashboard for public crypto and global-market data, with rule-based context and optional manual AI analysis. **It does not trade, connect to exchange accounts, or access wallets.**
 
 ## What's new in v1.7.0
 
@@ -9,6 +9,12 @@
 - **More table room:** page one shows the crypto watchlist beside global markets; page two shows the market read/action checklist beside global headlines. Status, summary cards, and controls remain visible when switching pages.
 - **Retained CustomTkinter UI:** rounded cards, buttons, entries, dropdowns, and scrollbars remain, with native `ttk.Treeview` tables for sorting and color semantics.
 - **Action guide:** the Market Insight page now briefly defines every action label and clarifies that TP Watch does not mean selling the entire holding.
+
+## What's new in v1.7.1
+
+- **RSS diagnostics:** Global Headlines now exposes a short Google News RSS status/error instead of silently hiding all failures.
+- **More resilient RSS parsing:** uses a browser-like User-Agent and handles RSS/Atom-style element naming more defensively.
+- **Faster retry after an empty feed:** retries after about 60 seconds when no headlines loaded, while successful feeds keep the 15-minute refresh interval. `Update now` remains available.
 
 ## Features
 
@@ -112,4 +118,3 @@ Market read and AI answers can be wrong. Verify data and sources independently; 
 > The repository preview image is from an older layout. Replace it with a fresh screenshot after checking v1.6.2 on Windows.
 
 ![Market Radar desktop preview](market-radar-preview.png)
-![Market Radar desktop preview](market-insight-preview.png)
