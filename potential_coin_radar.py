@@ -49,7 +49,7 @@ def research_http_json(
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "MarketRadar/1.12.0 (personal research dashboard)",
+            "User-Agent": "MarketRadar/1.13.0 (personal research dashboard)",
             "Accept": "application/json",
         },
         method="GET",

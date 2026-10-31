@@ -16,9 +16,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import customtkinter as ctk
 import potential_coin_radar as pcr
+from anomaly_radar import MarketAnomalyEngine, SCAN_INTERVAL_SECONDS
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.12.0"
+APP_VERSION = "1.13.0"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -910,13 +911,18 @@ def evaluate_trade_signal(row: dict[str, Any], metrics: dict[str, Any],
     }
 
 
-def select_technical_candidates(crypto: dict[str, dict[str, Any]], limit: int = SIGNAL_MAX_ASSETS) -> list[str]:
+def select_technical_candidates(
+    crypto: dict[str, dict[str, Any]], limit: int = SIGNAL_MAX_ASSETS,
+    priority_symbols: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
     valid = [(symbol, row) for symbol, row in crypto.items()
              if row.get("available") and num(row.get("price")) is not None]
     by_volume = [symbol for symbol, _ in sorted(valid, key=lambda item: num(item[1].get("volume_idr")) or 0, reverse=True)]
     valid_symbols = {symbol.upper() for symbol, _ in valid}
     chosen: list[str] = []
-    for symbol in SIGNAL_PRIORITY_SYMBOLS:
+    priority_order = [str(symbol).upper() for symbol in (priority_symbols or ())]
+    priority_order.extend(symbol for symbol in SIGNAL_PRIORITY_SYMBOLS if symbol not in priority_order)
+    for symbol in priority_order:
         if symbol in valid_symbols:
             chosen.append(next(key for key, _ in valid if key.upper() == symbol))
     for symbol in by_volume:
@@ -929,10 +935,15 @@ def select_technical_candidates(crypto: dict[str, dict[str, Any]], limit: int = 
 
 def enrich_entry_exit_data(
     crypto: dict[str, dict[str, Any]], limit: int = SIGNAL_MAX_ASSETS,
+    priority_symbols: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], str]:
-    """Fetch bounded candle history and attach deterministic signals to a copied quote snapshot."""
+    """Fetch bounded candle history and attach deterministic signals to a copied quote snapshot.
+
+    A coin selected from Anomaly Radar can be given first scan priority without
+    changing the established default watchlist order or signal rules.
+    """
     enriched = {symbol: dict(row) for symbol, row in crypto.items()}
-    symbols = select_technical_candidates(enriched, limit=limit)
+    symbols = select_technical_candidates(enriched, limit=limit, priority_symbols=priority_symbols)
     if not symbols:
         return enriched, "Tidak ada kandidat dengan quote yang tersedia."
 
@@ -2194,6 +2205,10 @@ class MarketRadarApp:
         self.news_data: list[dict[str, Any]] = []
         self.ai_model, self.ai_key = load_ai_settings()
         self.ai_busy = False
+        self.anomaly_engine = MarketAnomalyEngine()
+        self.anomaly_scanning = False
+        self.anomaly_status_var = tk.StringVar(value="Anomaly Radar: menyiapkan pemindaian seluruh pair IDR…")
+        self._anomaly_window = None
         self.crypto_sort_key = "volume_idr"
         self.crypto_sort_reverse = True
         self.macro_sort_key: str | None = None
@@ -2212,6 +2227,7 @@ class MarketRadarApp:
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.after(300, self.refresh_data)
         root.after(1000, self._clock_tick)
+        root.after(5_000, self._anomaly_tick)
         root.after(REFRESH_SECONDS*1000, self._auto_refresh_tick)
 
     def _setup_style(self) -> None:
@@ -2522,53 +2538,88 @@ class MarketRadarApp:
         news_panel = self._make_panel(reads_right_shell, "GLOBAL HEADLINES · DOUBLE-CLICK TO OPEN")
         news_panel.pack(fill="both", expand=True, padx=(4, 0), pady=8)
 
-        ai_controls = ctk.CTkFrame(analysis_panel, fg_color="transparent", corner_radius=0)
-        ai_controls.pack(fill="x", padx=10, pady=(0, 6))
+        ai_settings_row = ctk.CTkFrame(analysis_panel, fg_color="transparent", corner_radius=0)
+        ai_settings_row.pack(fill="x", padx=10, pady=(0, 6))
         self.ai_settings_button = ctk.CTkButton(
-            ai_controls, text="AI Settings", command=self.open_ai_settings,
-            width=84, height=30, corner_radius=8, fg_color=COLORS["panel2"],
+            ai_settings_row, text="AI Settings", command=self.open_ai_settings,
+            width=84, height=29, corner_radius=8, fg_color=COLORS["panel2"],
             hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 10),
+            border_color=COLORS["border"], font=("Segoe UI", 9),
         )
-        self.ai_settings_button.pack(side="left", padx=(0, 5))
-        self.ai_buttons: dict[str, Any] = {}
-        self.ai_button_labels = {"market": "Market Analyst", "entry_exit": "Entry / Exit Analyst", "potential_coins": "Potential Coin Radar"}
-        self.ai_buttons["market"] = ctk.CTkButton(
-            ai_controls, text=self.ai_button_labels["market"],
-            command=lambda: self.run_ai_analysis("market"), width=116, height=30,
-            corner_radius=8, fg_color="#2d72c7", hover_color="#3986df",
-            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
-            font=("Segoe UI", 10, "bold"),
-        )
-        self.ai_buttons["market"].pack(side="left", padx=(0, 5))
-        self.ai_buttons["entry_exit"] = ctk.CTkButton(
-            ai_controls, text=self.ai_button_labels["entry_exit"],
-            command=lambda: self.run_ai_analysis("entry_exit"), width=142, height=30,
-            corner_radius=8, fg_color=COLORS["panel2"], hover_color="#293b51",
-            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
-            font=("Segoe UI", 10, "bold"),
-        )
-        self.ai_buttons["entry_exit"].pack(side="left", padx=(0, 8))
+        self.ai_settings_button.pack(side="left", padx=(0, 8))
         self.ai_status_var = tk.StringVar(value=("AI siap · " + self.ai_model) if self.ai_key else "AI belum aktif · atur API key di AI Settings")
         ctk.CTkLabel(
-            ai_controls, textvariable=self.ai_status_var, text_color=COLORS["muted"],
-            wraplength=230, justify="left", anchor="w", font=("Segoe UI", 9),
+            ai_settings_row, textvariable=self.ai_status_var, text_color=COLORS["muted"],
+            wraplength=400, justify="left", anchor="w", font=("Segoe UI", 9),
         ).pack(side="left", fill="x", expand=True)
-        radar_controls = ctk.CTkFrame(analysis_panel, fg_color="transparent", corner_radius=0)
-        radar_controls.pack(fill="x", padx=10, pady=(0, 6))
-        self.ai_buttons["potential_coins"] = ctk.CTkButton(
-            radar_controls, text=self.ai_button_labels["potential_coins"],
-            command=lambda: self.run_ai_analysis("potential_coins"), width=178, height=30,
-            corner_radius=8, fg_color="#244638", hover_color="#2d604b",
-            text_color=COLORS["text"], border_width=1, border_color=COLORS["green"],
-            font=("Segoe UI", 10, "bold"),
+
+        # Keep four analytical tools, but group them by their role so the panel
+        # reads as three workflows instead of four unrelated AI buttons.
+        mode_groups = ctk.CTkFrame(analysis_panel, fg_color="transparent", corner_radius=0)
+        mode_groups.pack(fill="x", padx=8, pady=(0, 5))
+        self.ai_buttons: dict[str, Any] = {}
+        self.ai_button_labels = {
+            "market": "Market Analyst",
+            "entry_exit": "Entry / Exit Analyst",
+            "potential_coins": "Potential Coin Radar",
+        }
+
+        def make_mode_group(title: str) -> ctk.CTkFrame:
+            group = ctk.CTkFrame(
+                mode_groups, fg_color=COLORS["panel2"], corner_radius=8,
+                border_width=1, border_color=COLORS["border"],
+            )
+            ctk.CTkLabel(
+                group, text=title, text_color=COLORS["muted"],
+                font=("Segoe UI", 8, "bold"), anchor="w",
+            ).pack(anchor="w", padx=7, pady=(4, 1))
+            return group
+
+        market_group = make_mode_group("MARKET CONTEXT")
+        market_group.pack(side="left", fill="y", padx=(0, 5))
+        self.ai_buttons["market"] = ctk.CTkButton(
+            market_group, text=self.ai_button_labels["market"],
+            command=lambda: self.run_ai_analysis("market"), width=126, height=29,
+            corner_radius=7, fg_color="#2d72c7", hover_color="#3986df",
+            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
+            font=("Segoe UI", 9, "bold"),
         )
-        self.ai_buttons["potential_coins"].pack(side="left", padx=(0, 8))
+        self.ai_buttons["market"].pack(padx=5, pady=(0, 5))
+
+        discovery_group = make_mode_group("DISCOVERY & MONITORING")
+        discovery_group.pack(side="left", fill="y", padx=(0, 5))
+        discovery_actions = ctk.CTkFrame(discovery_group, fg_color="transparent", corner_radius=0)
+        discovery_actions.pack(padx=5, pady=(0, 5))
+        self.ai_buttons["potential_coins"] = ctk.CTkButton(
+            discovery_actions, text=self.ai_button_labels["potential_coins"],
+            command=lambda: self.run_ai_analysis("potential_coins"), width=145, height=29,
+            corner_radius=7, fg_color="#244638", hover_color="#2d604b",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["green"],
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.ai_buttons["potential_coins"].pack(side="left", padx=(0, 4))
+        self.anomaly_button = ctk.CTkButton(
+            discovery_actions, text="Anomaly Radar", command=self.open_anomaly_radar,
+            width=112, height=29, corner_radius=7, fg_color="#59431f",
+            hover_color="#765a29", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["yellow"], font=("Segoe UI", 9, "bold"),
+        )
+        self.anomaly_button.pack(side="left")
+
+        trade_group = make_mode_group("TRADE EVALUATION")
+        trade_group.pack(side="left", fill="y")
+        self.ai_buttons["entry_exit"] = ctk.CTkButton(
+            trade_group, text=self.ai_button_labels["entry_exit"],
+            command=lambda: self.run_ai_analysis("entry_exit"), width=142, height=29,
+            corner_radius=7, fg_color=COLORS["panel"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.ai_buttons["entry_exit"].pack(padx=5, pady=(0, 5))
         ctk.CTkLabel(
-            radar_controls,
-            text="Scan candle + riset tim/produk, GitHub, TVL & revenue protokol",
-            text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w",
-        ).pack(side="left", fill="x", expand=True)
+            analysis_panel, textvariable=self.anomaly_status_var,
+            text_color=COLORS["muted"], font=("Segoe UI", 8), anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 5))
         self.analysis_text = tk.Text(
             analysis_panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
             insertbackground=COLORS["text"], relief="flat", padx=12, pady=7,
@@ -2777,6 +2828,333 @@ class MarketRadarApp:
         else:
             count_crypto=sum(1 for d in self.crypto_data.values() if d.get("available"));count_macro=sum(1 for d in self.macro_data.values() if d.get("available"))
             self.status_var.set(f"Refresh dicek {retrieved.strftime('%d %b %Y %H:%M:%S WIB')} · INDODAX {count_crypto}/{len(CRYPTO_ASSETS)} aset · pasar global {count_macro}/{len(MACRO_ASSETS)} quote")
+
+    def _anomaly_tick(self) -> None:
+        """Poll the public all-pairs IDR ticker independently of the 90s dashboard refresh."""
+        if self.closing:
+            return
+        if not self.anomaly_scanning:
+            self.anomaly_scanning = True
+            pair_lookup = {
+                symbol: {"pair_id": row.get("pair_id") or (symbol.lower() + "idr"),
+                         "name": row.get("name") or symbol}
+                for symbol, row in self.crypto_data.items()
+            }
+            threading.Thread(
+                target=self._anomaly_worker, args=(pair_lookup,), daemon=True,
+            ).start()
+        self.root.after(SCAN_INTERVAL_SECONDS * 1000, self._anomaly_tick)
+
+    def _anomaly_worker(self, pair_lookup: dict[str, dict[str, Any]]) -> None:
+        try:
+            payload = self.anomaly_engine.fetch_summary_payload()
+            self.anomaly_engine.update_from_payload(payload, pair_lookup)
+            self.anomaly_engine.enrich_active_alerts(max_pairs=3)
+            error = None
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {str(exc)[:160]}"
+            self.anomaly_engine.last_error = error
+        try:
+            self.root.after(0, lambda: self._apply_anomaly_scan(error))
+        except tk.TclError:
+            pass
+
+    def _apply_anomaly_scan(self, error: str | None) -> None:
+        if self.closing:
+            return
+        self.anomaly_scanning = False
+        self.anomaly_status_var.set(self.anomaly_engine.status_text())
+        if error:
+            self.anomaly_status_var.set(f"Anomaly Radar tidak tersedia · {error[:110]}")
+        elif self.anomaly_engine.active_alerts:
+            count = len(self.anomaly_engine.active_alerts)
+            self.anomaly_status_var.set(
+                f"Anomaly Radar · {count} pair perlu diperiksa · snapshot {self.anomaly_engine.last_scan_at.strftime('%H:%M:%S WIB')}"
+            )
+        self._populate_anomaly_tree()
+
+    @staticmethod
+    def _anomaly_price_text(value: Any) -> str:
+        number = num(value)
+        return "—" if number is None else fmt_idr(number)
+
+    @staticmethod
+    def _anomaly_pct_text(value: Any) -> str:
+        number = num(value)
+        return "—" if number is None else f"{number:+.2f}%"
+
+    def open_anomaly_radar(self) -> None:
+        """Show live all-pair anomaly detections and access the local event journal."""
+        if self._anomaly_window is not None:
+            try:
+                if self._anomaly_window.winfo_exists():
+                    self._anomaly_window.lift()
+                    self._populate_anomaly_tree()
+                    return
+            except tk.TclError:
+                pass
+        win = ctk.CTkToplevel(self.root)
+        self._anomaly_window = win
+        win.title("Market Radar · Anomaly Radar")
+        win.geometry("1120x650")
+        win.minsize(920, 520)
+        win.transient(self.root)
+        win.configure(fg_color=COLORS["bg"])
+        win.protocol("WM_DELETE_WINDOW", lambda: self._close_anomaly_window(win))
+        surface = ctk.CTkFrame(
+            win, fg_color=COLORS["panel"], border_color=COLORS["border"],
+            border_width=1, corner_radius=14,
+        )
+        surface.pack(fill="both", expand=True, padx=12, pady=12)
+        header = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        header.pack(fill="x", padx=12, pady=(10, 5))
+        ctk.CTkLabel(
+            header, text="ANOMALY RADAR · ALL INDODAX IDR PAIRS",
+            text_color=COLORS["text"], font=("Segoe UI", 13, "bold"), anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            header, text="Refresh scan", command=self._request_anomaly_scan,
+            width=104, height=29, corner_radius=7, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 9),
+        ).pack(side="left", padx=(5, 0))
+        ctk.CTkButton(
+            header, text="History / Replay", command=self.open_anomaly_history,
+            width=116, height=29, corner_radius=7, fg_color=COLORS["panel2"],
+            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
+            border_color=COLORS["border"], font=("Segoe UI", 9),
+        ).pack(side="left", padx=(5, 0))
+        ctk.CTkLabel(
+            surface,
+            text="Deteksi menggunakan ticker seluruh pair IDR tiap 30 detik. Trade dan depth diperiksa hanya untuk maksimal 3 anomali teratas per scan dan mengikuti cooldown.",
+            text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w", justify="left",
+            wraplength=1020,
+        ).pack(fill="x", padx=14, pady=(0, 7))
+        cols = ("asset", "severity", "flags", "price", "move1", "move5", "wick", "spread", "vol24", "trades", "book")
+        tree_frame = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        tree_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=16)
+        headers = {
+            "asset": "Pair", "severity": "Severity", "flags": "Detection",
+            "price": "Last IDR", "move1": "1m", "move5": "5m",
+            "wick": "24h wick", "spread": "Spread", "vol24": "Vol 24h",
+            "trades": "Trades 5m", "book": "Bid depth / Ask depth",
+        }
+        widths = {"asset": 105, "severity": 75, "flags": 160, "price": 112, "move1": 68,
+                  "move5": 68, "wick": 80, "spread": 70, "vol24": 100, "trades": 76, "book": 150}
+        for col in cols:
+            tree.heading(col, text=headers[col], anchor="center")
+            tree.column(col, width=widths[col], minwidth=58, anchor="center", stretch=(col in {"flags", "book"}))
+        tree.tag_configure("critical", foreground=COLORS["red"])
+        tree.tag_configure("high", foreground="#ff9b72")
+        tree.tag_configure("warning", foreground=COLORS["yellow"])
+        tree.tag_configure("empty", foreground=COLORS["muted"])
+        scroll = ctk.CTkScrollbar(tree_frame, orientation="vertical", command=tree.yview,
+                                  fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+        tree.bind("<Double-Button-1>", lambda _event: self._show_selected_anomaly(tree))
+        footer = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        footer.pack(fill="x", padx=12, pady=(0, 9))
+        status = ctk.CTkLabel(footer, textvariable=self.anomaly_status_var,
+                              text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w")
+        status.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            footer, text="View selected details", command=lambda: self._show_selected_anomaly(tree),
+            width=145, height=29, corner_radius=7, fg_color="#2d72c7", hover_color="#3986df",
+            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="right")
+        self._anomaly_tree = tree
+        self._populate_anomaly_tree()
+
+    def _close_anomaly_window(self, win: Any) -> None:
+        try:
+            win.destroy()
+        except tk.TclError:
+            pass
+        if self._anomaly_window is win:
+            self._anomaly_window = None
+
+    def _request_anomaly_scan(self) -> None:
+        if self.anomaly_scanning or self.closing:
+            return
+        pair_lookup = {
+            symbol: {"pair_id": row.get("pair_id") or (symbol.lower() + "idr"),
+                     "name": row.get("name") or symbol}
+            for symbol, row in self.crypto_data.items()
+        }
+        self.anomaly_scanning = True
+        threading.Thread(target=self._anomaly_worker, args=(pair_lookup,), daemon=True).start()
+
+    def _populate_anomaly_tree(self) -> None:
+        tree = getattr(self, "_anomaly_tree", None)
+        if tree is None:
+            return
+        try:
+            for iid in tree.get_children():
+                tree.delete(iid)
+            rows = self.anomaly_engine.active_alerts
+            if not rows:
+                tree.insert("", "end", iid="__empty__", values=(
+                    "No active alert", "—", "Belum terdeteksi", "—", "—", "—", "—", "—", "—", "—", "—",
+                ), tags=("empty",))
+                return
+            for row in rows:
+                bid_depth = num(row.get("bid_depth_1pct_idr"))
+                ask_depth = num(row.get("ask_depth_1pct_idr"))
+                book = (f"{fmt_volume_idr(bid_depth)} / {fmt_volume_idr(ask_depth)}"
+                        if bid_depth is not None or ask_depth is not None else "Belum dicek")
+                trades = row.get("trade_count_5m")
+                values = (
+                    f"{row.get('symbol')} / IDR", row.get("severity", "—"),
+                    " · ".join(row.get("flags") or []), self._anomaly_price_text(row.get("price")),
+                    self._anomaly_pct_text(row.get("change_1m_pct")),
+                    self._anomaly_pct_text(row.get("change_5m_pct")),
+                    self._anomaly_pct_text(row.get("wick_from_high_pct")),
+                    self._anomaly_pct_text(row.get("spread_pct")),
+                    fmt_volume_idr(row.get("volume_24h_idr")),
+                    str(trades) if trades is not None else "Belum dicek", book,
+                )
+                tag = str(row.get("severity", "WARNING")).lower()
+                tree.insert("", "end", iid=str(row.get("symbol")), values=values, tags=(tag,))
+        except tk.TclError:
+            return
+
+    def _show_selected_anomaly(self, tree: Any) -> None:
+        selected = tree.selection()
+        if not selected or selected[0] == "__empty__":
+            return
+        symbol = selected[0]
+        row = next((item for item in self.anomaly_engine.active_alerts if item.get("symbol") == symbol), None)
+        if row is None:
+            return
+        self._show_anomaly_detail_window("Active anomaly · " + symbol, row)
+
+    def open_anomaly_history(self) -> None:
+        history = self.anomaly_engine.get_history(limit=200)
+        win = ctk.CTkToplevel(self.root)
+        win.title("Market Radar · Anomaly History / Replay")
+        win.geometry("900x560")
+        win.transient(self.root)
+        win.configure(fg_color=COLORS["bg"])
+        surface = ctk.CTkFrame(win, fg_color=COLORS["panel"], border_color=COLORS["border"],
+                               border_width=1, corner_radius=14)
+        surface.pack(fill="both", expand=True, padx=12, pady=12)
+        ctk.CTkLabel(
+            surface, text="HISTORICAL ANOMALY EVENT LOG", text_color=COLORS["text"],
+            font=("Segoe UI", 13, "bold"), anchor="w",
+        ).pack(fill="x", padx=13, pady=(11, 4))
+        ctk.CTkLabel(
+            surface,
+            text="Catatan lokal dimulai sejak Anomaly Radar v1.13.0 dijalankan. Ini bukan backfill historis sebelum pemasangan dan bukan rekonstruksi setiap transaksi.",
+            text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w", justify="left",
+            wraplength=820,
+        ).pack(fill="x", padx=13, pady=(0, 7))
+        cols = ("time", "asset", "type", "severity", "price", "move5", "wick", "spread")
+        frame = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+        tree = ttk.Treeview(frame, columns=cols, show="headings", height=15)
+        headers = {"time": "Detected (WIB)", "asset": "Pair", "type": "Event",
+                   "severity": "Severity", "price": "Captured price", "move5": "5m move",
+                   "wick": "24h wick", "spread": "Spread"}
+        widths = {"time": 150, "asset": 100, "type": 155, "severity": 80,
+                  "price": 120, "move5": 85, "wick": 90, "spread": 80}
+        for col in cols:
+            tree.heading(col, text=headers[col], anchor="center")
+            tree.column(col, width=widths[col], minwidth=65, anchor="center")
+        tree.tag_configure("critical", foreground=COLORS["red"])
+        tree.tag_configure("high", foreground="#ff9b72")
+        tree.tag_configure("warning", foreground=COLORS["yellow"])
+        for index, event in enumerate(history):
+            tree.insert("", "end", iid=str(index), values=(
+                event.get("detected_at", "—"), f"{event.get('symbol', '—')}/IDR",
+                event.get("anomaly_type", "—"), event.get("severity", "—"),
+                self._anomaly_price_text(event.get("price")),
+                self._anomaly_pct_text(event.get("change_5m_pct")),
+                self._anomaly_pct_text(event.get("wick_from_high_pct")),
+                self._anomaly_pct_text(event.get("spread_pct")),
+            ), tags=(str(event.get("severity", "WARNING")).lower(),))
+        if not history:
+            tree.insert("", "end", values=("Belum ada event", "—", "Mulai scan dulu", "—", "—", "—", "—", "—"))
+        scroll = ctk.CTkScrollbar(frame, orientation="vertical", command=tree.yview,
+                                  fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+        tree.bind("<Double-Button-1>", lambda _event: self._show_selected_history_event(tree, history))
+        ctk.CTkButton(
+            surface, text="View selected event", command=lambda: self._show_selected_history_event(tree, history),
+            width=150, height=30, corner_radius=7, fg_color="#2d72c7", hover_color="#3986df",
+            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="e", padx=13, pady=(0, 10))
+
+    def _show_selected_history_event(self, tree: Any, history: list[dict[str, Any]]) -> None:
+        selected = tree.selection()
+        if not selected:
+            return
+        try:
+            event = history[int(selected[0])]
+        except (ValueError, IndexError):
+            return
+        self._show_anomaly_detail_window("Historical event · " + str(event.get("symbol") or ""), event)
+
+    def _show_anomaly_detail_window(self, title: str, row: dict[str, Any]) -> None:
+        win = ctk.CTkToplevel(self.root)
+        win.title("Market Radar · " + title)
+        win.geometry("720x500")
+        win.transient(self.root)
+        win.configure(fg_color=COLORS["bg"])
+        panel = ctk.CTkFrame(win, fg_color=COLORS["panel"], border_color=COLORS["border"],
+                             border_width=1, corner_radius=14)
+        panel.pack(fill="both", expand=True, padx=12, pady=12)
+        ctk.CTkLabel(panel, text=title, text_color=COLORS["text"],
+                     font=("Segoe UI", 13, "bold"), anchor="w").pack(fill="x", padx=13, pady=(11, 6))
+        lines = [
+            f"Severity: {row.get('severity', '—')}",
+            f"Detected: {row.get('detected_at') or row.get('quote_at') or '—'}",
+            f"Pair: {row.get('symbol', '—')}/IDR · {row.get('pair_id', '—')}",
+            f"Last price: {self._anomaly_price_text(row.get('price'))}",
+            f"1m / 5m / 15m: {self._anomaly_pct_text(row.get('change_1m_pct'))} / {self._anomaly_pct_text(row.get('change_5m_pct'))} / {self._anomaly_pct_text(row.get('change_15m_pct'))}",
+            f"24h high-wick gap: {self._anomaly_pct_text(row.get('wick_from_high_pct'))}",
+            f"Spread: {self._anomaly_pct_text(row.get('spread_pct'))}",
+            f"24h turnover: {fmt_volume_idr(row.get('volume_24h_idr'))}",
+            f"Recent trades (5m): {row.get('trade_count_5m', 'not available')} · notional {fmt_volume_idr(row.get('trade_notional_5m_idr'))}",
+            f"Order-book depth ±1%: bid {fmt_volume_idr(row.get('bid_depth_1pct_idr'))} / ask {fmt_volume_idr(row.get('ask_depth_1pct_idr'))}",
+            f"Book imbalance: {self._anomaly_pct_text((num(row.get('book_imbalance')) or 0) * 100) if row.get('book_imbalance') is not None else '—'}",
+            "",
+            "Evidence:",
+        ]
+        lines.extend("• " + str(item) for item in (row.get("evidence") or []))
+        if row.get("trades_error"):
+            lines.append("Trade endpoint: " + str(row["trades_error"]))
+        if row.get("book_error"):
+            lines.append("Depth endpoint: " + str(row["book_error"]))
+        lines.extend([
+            "",
+            "Catatan: harga high 24 jam bukan bukti bahwa seluruh posisi bisa dijual pada harga tersebut. Periksa bid depth, transaksi aktual, spread, dan jumlah order sebelum mengambil keputusan.",
+        ])
+        output = tk.Text(panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
+                         insertbackground=COLORS["text"], relief="flat", padx=12, pady=9,
+                         font=("Segoe UI", 10), borderwidth=0, highlightthickness=0)
+        output.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+        output.insert("1.0", "\n".join(lines))
+        output.configure(state="disabled")
+        actions = ctk.CTkFrame(panel, fg_color="transparent", corner_radius=0)
+        actions.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkButton(
+            actions, text="Analyze with Entry / Exit Analyst",
+            command=lambda: self.run_ai_analysis("entry_exit", focus_symbol=str(row.get("symbol") or "")),
+            width=220, height=30, corner_radius=7, fg_color="#2d72c7", hover_color="#3986df",
+            text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        ctk.CTkLabel(
+            actions, text="Pair dari alert diprioritaskan dalam scan teknikal.",
+            text_color=COLORS["muted"], font=("Segoe UI", 8), anchor="w",
+        ).pack(side="left", padx=(8, 0))
 
     def _render_crypto(self) -> None:
         selected_before = self.crypto_tree.selection()
@@ -3144,7 +3522,7 @@ class MarketRadarApp:
             font=("Segoe UI", 10, "bold"),
         ).pack(side="right", padx=(0, 6))
 
-    def run_ai_analysis(self, analysis_type: str = "market") -> None:
+    def run_ai_analysis(self, analysis_type: str = "market", focus_symbol: str | None = None) -> None:
         if analysis_type not in {"market", "entry_exit", "potential_coins"}:
             return
         if self.ai_busy:
@@ -3181,7 +3559,7 @@ class MarketRadarApp:
         # Data objects are replaced—not mutated—by refreshes, so shallow snapshots are safe here.
         args = (
             self.ai_key, self.ai_model, analysis_type,
-            dict(self.crypto_data), dict(self.macro_data), list(self.news_data),
+            dict(self.crypto_data), dict(self.macro_data), list(self.news_data), focus_symbol,
         )
         threading.Thread(target=self._ai_worker, args=args, daemon=True).start()
 
@@ -3193,13 +3571,17 @@ class MarketRadarApp:
         crypto: dict[str, dict[str, Any]],
         macro: dict[str, dict[str, Any]],
         news: list[dict[str, Any]],
+        focus_symbol: str | None = None,
     ) -> None:
         mode_label = {"market": "Market Analyst", "entry_exit": "Entry & Exit Analyst", "potential_coins": "Potential Coin Radar"}[analysis_type]
+        if analysis_type == "entry_exit" and focus_symbol:
+            mode_label += f" · prioritas {focus_symbol.upper()}"
         analysed_crypto: dict[str, dict[str, Any]] | None = None
         try:
             signal_summary = ""
             if analysis_type == "entry_exit":
-                crypto, technical_status = enrich_entry_exit_data(crypto)
+                priority_symbols = [focus_symbol] if focus_symbol else None
+                crypto, technical_status = enrich_entry_exit_data(crypto, priority_symbols=priority_symbols)
                 analysed_crypto = crypto
                 asset_news = fetch_asset_news(crypto)
                 for symbol, headlines in asset_news.items():
