@@ -20,7 +20,7 @@ COINPAPRIKA_BASE_URL = "https://api.coinpaprika.com/v1"
 COINPAPRIKA_CREDIT = "Powered by CoinPaprika"
 DEFILLAMA_PROTOCOLS_URL = "https://api.llama.fi/protocols"
 DEFILLAMA_REVENUE_URL = "https://api.llama.fi/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyRevenue"
-POTENTIAL_RADAR_SCAN_LIMIT = 24
+POTENTIAL_RADAR_SCAN_LIMIT = 36
 POTENTIAL_RADAR_PROFILE_LIMIT = 8
 POTENTIAL_RADAR_GITHUB_LIMIT = 3
 POTENTIAL_RADAR_NEWS_LIMIT = 5
@@ -49,7 +49,7 @@ def research_http_json(
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "MarketRadar/1.11.0 (personal research dashboard)",
+            "User-Agent": "MarketRadar/1.12.0 (personal research dashboard)",
             "Accept": "application/json",
         },
         method="GET",
@@ -626,7 +626,7 @@ def format_potential_radar_summary(crypto: dict[str, dict[str, Any]], status_lin
         price_text = _format_idr(row.get("price"))
         volume_text = _format_volume(row.get("volume_idr"))
         score = int(_finite_number(setup.get("score")) or 0)
-        max_score = int(_finite_number(setup.get("max_score")) or 6)
+        max_score = int(_finite_number(setup.get("max_score")) or 8)
         setup_label = str(setup.get("label") or "NO DATA").replace("_", " ")
         lines.extend([
             "",

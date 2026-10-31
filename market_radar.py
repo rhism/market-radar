@@ -18,7 +18,7 @@ import customtkinter as ctk
 import potential_coin_radar as pcr
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.11.1"
+APP_VERSION = "1.12.0"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -511,6 +511,35 @@ def technical_metrics(candles_1h: list[dict[str, Any]], now_timestamp: int | Non
     swing_low_8h = min(recent_lows[-8:])
     swing_high_24h = max(float(item["high"]) for item in one_h[-24:])
     swing_high_48h = max(float(item["high"]) for item in one_h[-48:])
+
+    # Additional basing diagnostics. Compare the latest three closed candles with
+    # the preceding nine; require the recent floor to hold near the earlier floor
+    # so quiet/illiquid candles alone do not count as accumulation evidence.
+    recent_three = one_h[-3:]
+    preceding_nine = one_h[-12:-3]
+    recent_floor = min(float(item["low"]) for item in recent_three)
+    preceding_floor = min(float(item["low"]) for item in preceding_nine) if preceding_nine else recent_floor
+    support_holding = bool(atr14 and atr14 > 0 and recent_floor >= preceding_floor - 0.15 * atr14)
+    recent_range = sum(float(item["high"]) - float(item["low"]) for item in recent_three) / len(recent_three)
+    preceding_range = (
+        sum(float(item["high"]) - float(item["low"]) for item in preceding_nine) / len(preceding_nine)
+        if preceding_nine else 0.0
+    )
+    range_compression_ratio = recent_range / preceding_range if preceding_range > 0 else None
+    range_compression = bool(
+        support_holding and range_compression_ratio is not None and range_compression_ratio <= 0.80
+    )
+    prior_bear_volumes = [float(item.get("volume") or 0) for item in preceding_nine
+                          if float(item["close"]) < float(item["open"])]
+    recent_bear_volumes = [float(item.get("volume") or 0) for item in recent_three
+                           if float(item["close"]) < float(item["open"])]
+    prior_bear_avg = sum(prior_bear_volumes) / len(prior_bear_volumes) if prior_bear_volumes else 0.0
+    recent_bear_avg = sum(recent_bear_volumes) / len(recent_bear_volumes) if recent_bear_volumes else 0.0
+    sell_volume_fade_ratio = recent_bear_avg / prior_bear_avg if prior_bear_avg > 0 else None
+    sell_pressure_fading = bool(
+        support_holding and len(prior_bear_volumes) >= 2 and
+        (not recent_bear_volumes or (sell_volume_fade_ratio is not None and sell_volume_fade_ratio <= 0.65))
+    )
     return {
         "available": True, "candles_1h": len(one_h), "candles_4h": len(four_h),
         "last_candle_time": int(last["time"]), "bar_age_minutes": round(bar_age_minutes, 1),
@@ -532,6 +561,11 @@ def technical_metrics(candles_1h: list[dict[str, Any]], now_timestamp: int | Non
         "reclaim_ema9": reclaim_ema9, "higher_low_3bar": higher_low,
         "return_6h_pct": return_6h, "swing_low_8h_idr": swing_low_8h,
         "swing_high_24h_idr": swing_high_24h, "swing_high_48h_idr": swing_high_48h,
+        "support_holding_12h": support_holding,
+        "range_compression_ratio_3v9": range_compression_ratio,
+        "range_compression_3v9": range_compression,
+        "sell_volume_fade_ratio_3v9": sell_volume_fade_ratio,
+        "sell_pressure_fading_3v9": sell_pressure_fading,
     }
 
 
@@ -539,7 +573,7 @@ def technical_metrics(candles_1h: list[dict[str, Any]], now_timestamp: int | Non
 def detect_early_reversal_setup(metrics: dict[str, Any]) -> dict[str, Any]:
     """Classify early basing/reversal evidence from closed 1h candles; never an auto-buy."""
     if not metrics.get("available"):
-        return {"label": "NO SIGNAL — DATA UNAVAILABLE", "score": 0, "evidence": [],
+        return {"label": "NO SIGNAL — DATA UNAVAILABLE", "score": 0, "max_score": 8, "evidence": [],
                 "is_actionable": False}
 
     rsi = num(metrics.get("rsi14_1h"))
@@ -557,6 +591,8 @@ def detect_early_reversal_setup(metrics: dict[str, Any]) -> dict[str, Any]:
     )
     volume_ratio = num(metrics.get("volume_ratio_1h"))
     volume_burst = bool(volume_ratio is not None and volume_ratio >= 1.2 and metrics.get("last_candle_bullish"))
+    range_compression = bool(metrics.get("range_compression_3v9"))
+    sell_pressure_fading = bool(metrics.get("sell_pressure_fading_3v9"))
 
     evidence: list[str] = []
     if rsi_rebound:
@@ -571,6 +607,12 @@ def detect_early_reversal_setup(metrics: dict[str, Any]) -> dict[str, Any]:
         evidence.append("candle bullish ditutup dekat high")
     if volume_burst:
         evidence.append(f"volume bullish {volume_ratio:.2f}x rata-rata 20 candle")
+    if range_compression:
+        ratio = num(metrics.get("range_compression_ratio_3v9"))
+        evidence.append(f"rentang candle menyempit ({ratio:.2f}x periode sebelumnya) dan area low bertahan" if ratio is not None else "rentang candle menyempit dan area low bertahan")
+    if sell_pressure_fading:
+        fade = num(metrics.get("sell_volume_fade_ratio_3v9"))
+        evidence.append(f"volume candle bearish mereda ({fade:.2f}x periode sebelumnya) dan support bertahan" if fade is not None else "volume candle bearish mereda dan support bertahan")
 
     trend_1h = str(metrics.get("trend_1h") or "MIXED")
     return_6h = num(metrics.get("return_6h_pct"))
@@ -580,12 +622,15 @@ def detect_early_reversal_setup(metrics: dict[str, Any]) -> dict[str, Any]:
         or (rsi is not None and rsi <= 43)
     )
     structural_confirmation = break_high or reclaim or higher_low
-    if down_context and len(evidence) >= 2 and structural_confirmation:
+    # Early reversal needs at least three independent clues plus a structural
+    # event. Base forming needs a stabilization clue, not merely two bullish bars.
+    basing_confirmation = range_compression or sell_pressure_fading
+    if down_context and len(evidence) >= 3 and structural_confirmation:
         label = "EARLY REVERSAL WATCH"
-        note = "Ada bukti awal perubahan momentum, tetapi belum berarti dasar harga terkonfirmasi."
-    elif down_context and len(evidence) >= 2:
+        note = "Ada beberapa bukti awal perubahan momentum dan konfirmasi struktur; tren belum tentu berbalik penuh."
+    elif down_context and len(evidence) >= 2 and basing_confirmation and not structural_confirmation:
         label = "BASE FORMING WATCH"
-        note = "Ada petunjuk stabilisasi, tetapi belum ada konfirmasi struktur yang cukup."
+        note = "Ada petunjuk stabilisasi melalui penyusutan rentang atau meredanya tekanan jual, tetapi belum ada konfirmasi struktur reversal."
     else:
         close = num(metrics.get("last_close_idr"))
         ema21 = num(metrics.get("ema21_1h"))
@@ -600,7 +645,7 @@ def detect_early_reversal_setup(metrics: dict[str, Any]) -> dict[str, Any]:
             label = "NO EARLY SETUP"
             note = "Belum ada kombinasi petunjuk reversal/pullback yang cukup dari candle tertutup."
     return {
-        "label": label, "score": len(evidence), "max_score": 6,
+        "label": label, "score": len(evidence), "max_score": 8,
         "evidence": evidence, "note": note,
         "downtrend_context": down_context,
         "structural_confirmation": structural_confirmation,
@@ -972,7 +1017,7 @@ def enrich_entry_exit_data(
                 }
         else:
             analysis["potential_setup"] = {
-                "label": "DATA / RISK GATE", "score": 0, "max_score": 6,
+                "label": "DATA / RISK GATE", "score": 0, "max_score": 8,
                 "evidence": [], "note": "Quote/candle stale atau tidak lengkap; setup reversal tidak dinilai.",
                 "is_actionable": False,
             }
@@ -1106,7 +1151,8 @@ def format_signal_summary(crypto: dict[str, dict[str, Any]], news_status: str = 
         setup = analysis.get("potential_setup") or {}
         setup_label = str(setup.get("label") or "—")
         setup_score = int(num(setup.get("score")) or 0)
-        lines.append(f"{label:<14} {symbol:<9} | {setup_label} ({setup_score}/6) · " + " · ".join(details))
+        setup_max_score = int(num(setup.get("max_score")) or 8)
+        lines.append(f"{label:<14} {symbol:<9} | {setup_label} ({setup_score}/{setup_max_score}) · " + " · ".join(details))
         if plan_lines < 4:
             plan = analysis.get("trade_plan") or {}
             status = plan.get("status")
@@ -1768,7 +1814,7 @@ def build_ai_snapshot(
         "crypto_data_source": "INDODAX public summaries API; prices in IDR",
         "technical_signal_method": ("INDODAX OHLC 1h closed candles + 4h aggregation; deterministic momentum confirmation and early-reversal/base-forming scan. Entry/TP/invalidation use ATR and recent swing structure; heuristics are not calibrated win probabilities and are not yet validated by walk-forward backtest." if analysis_type in {"entry_exit", "potential_coins"} else None),
         "fundamental_news_limit": ("Headlines are unverified clues. Project/team/product data come only from named public source fields in this snapshot; missing data are not inferred. DeFiLlama protocol dailyRevenue may be included when exact-matched; it is not company financial reporting. Company financials, token unlocks and independent audit verification are not comprehensive in this scan." if analysis_type == "potential_coins" else "Per-asset Google News RSS headlines are only event clues; they do not replace tokenomics, unlock calendars, security audits, TVL, protocol revenue, or primary-source verification." if analysis_type == "entry_exit" else None),
-        "potential_radar_limit": ("Scans at most 24 higher-priority/liquid Indodax IDR pairs, profiles up to 8 technically prioritized candidates, and checks at most 3 explicit GitHub repositories. Exact symbol+normalized-name matching only; no guessed matches. Priority order is not probability of gain." if analysis_type == "potential_coins" else None),
+        "potential_radar_limit": ("Scans at most 36 higher-priority/liquid Indodax IDR pairs, profiles up to 8 technically prioritized candidates, and checks at most 3 explicit GitHub repositories. Exact symbol+normalized-name matching only; no guessed matches. Priority order is not probability of gain." if analysis_type == "potential_coins" else None),
         "coinpaprika_attribution": (pcr.COINPAPRIKA_CREDIT if analysis_type == "potential_coins" else None),
         "crypto_pairs_available": len(valid),
         "crypto_pairs_loaded": len(crypto),
@@ -1803,7 +1849,7 @@ def _ai_prompts(analysis_type: str) -> tuple[str, str, int]:
         return common, task, 1100
     if analysis_type == "potential_coins":
         task = (
-            "ROLE: POTENTIAL COIN RADAR. Find the most interesting early-stage upward setups among the supplied Indodax IDR pairs, combining closed-candle evidence with source-grounded project research. "
+            "ROLE: POTENTIAL COIN RADAR. Find the most interesting early-stage upward setups among the supplied Indodax IDR pairs, combining closed-candle evidence with source-grounded project research. The technical score is out of 8 checks; explain that it is a count of clues, not a win probability. "
             "The snapshot covers a bounded scan, not every exchange listing. Select up to 5 candidates for deeper reading; return NO HIGH-CONFIDENCE CANDIDATE if evidence is weak. "
             "An early-reversal/base-forming label is a watchlist clue, never a probability, guarantee, or buy order. Do not select a coin solely because its price rose. "
             "Use only exact supplied current IDR prices, entry zone, TP1, TP2, invalidation, risk/reward and plan status from technical_signal.trade_plan. Never calculate a missing price yourself. "
@@ -1815,7 +1861,7 @@ def _ai_prompts(analysis_type: str) -> tuple[str, str, int]:
             "FORMAT IS IMPORTANT: Write in readable Indonesian with blank lines between sections. Use plain Markdown headings and bullets; do not make a table. Keep the scan summary as an overview and do not copy its entire candidate list. "
             "Use this exact structure: "
             "## RINGKASAN UTAMA (2–4 bullets: number scanned, setup counts, strongest caveat, and whether any candidate is actually entry-ready). "
-            "## SHORTLIST UNTUK DITINJAU (up to 5 candidates, strongest evidence first). For EACH candidate create a separate card starting '### 1. SYMBOL — setup label | score x/6' (use the true rank/score only when supplied). Then separate these subheadings: '**Status:**'; '**Mengapa dipantau**' (2–4 short bullets of actual technical evidence, also explain remaining trend context); '**Riset proyek & produk**' (short bullets for what the project does, team/product/repos/TVL/revenue only if sourced); '**Rencana harga (IDR)**' with four separate bullets for entry trigger/zone, TP1, TP2 and invalidation, including exact plan status and conditions; '**Risiko utama & data yang belum tersedia**' (short bullets; distinguish confirmed source info from unknowns); '**Sumber**' with one source URL per bullet and what it supports. Put a horizontal separator '---' between candidate cards. "
+            "## SHORTLIST UNTUK DITINJAU (up to 5 candidates, strongest evidence first). For EACH candidate create a separate card starting '### 1. SYMBOL — setup label | score x/8' (use the true rank/score only when supplied). Then separate these subheadings: '**Status:**'; '**Mengapa dipantau**' (2–4 short bullets of actual technical evidence, also explain remaining trend context); '**Riset proyek & produk**' (short bullets for what the project does, team/product/repos/TVL/revenue only if sourced); '**Rencana harga (IDR)**' with four separate bullets for entry trigger/zone, TP1, TP2 and invalidation, including exact plan status and conditions; '**Risiko utama & data yang belum tersedia**' (short bullets; distinguish confirmed source info from unknowns); '**Sumber**' with one source URL per bullet and what it supports. Put a horizontal separator '---' between candidate cards. "
             "Then add '## KESIMPULAN & LANGKAH BERIKUTNYA' (state which candidates deserve research first and why; never call a watch label a buy). Finish with '## CATATAN DATA' including CoinPaprika attribution and personal/non-commercial restriction. "
             "Maintain useful detail but avoid repeated prose. Target 650–900 words maximum; readability and source fidelity matter more than filling the word limit. Never refer to ranking as probability of gain."
         )
@@ -3171,7 +3217,7 @@ class MarketRadarApp:
             if analysis_type == "potential_coins":
                 mode_limits = (
                     "## CATATAN BATASAN DAN SUMBER\n"
-                    "• Cakupan: maksimal 24 pair IDR, profil proyek sampai 8 kandidat, serta maksimal 3 repositori GitHub per scan.\n"
+                    "• Cakupan: maksimal 36 pair IDR, profil proyek sampai 8 kandidat, serta maksimal 3 repositori GitHub per scan.\n"
                     "• Data tim/kualitas proyek dari katalog belum diverifikasi independen. TVL dan dailyRevenue protokol bukan laporan keuangan perusahaan atau laba investor.\n"
                     "• Data token unlock, audit independen, laporan keuangan, dan manfaat langsung token belum lengkap. Urutan kandidat bukan probabilitas profit; level teknikal belum lulus backtest walk-forward.\n"
                     "• CoinPaprika: Powered by CoinPaprika. Tier ini untuk penggunaan personal/nonkomersial; penggunaan komersial memerlukan izin yang sesuai.\n"
