@@ -16,10 +16,12 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import customtkinter as ctk
 import potential_coin_radar as pcr
-from anomaly_radar import MarketAnomalyEngine, SCAN_INTERVAL_SECONDS
+from anomaly_radar import (
+    MarketAnomalyEngine, SCAN_INTERVAL_SECONDS, filter_anomaly_rows, sort_anomaly_rows,
+)
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.13.0"
+APP_VERSION = "1.13.1"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -2209,6 +2211,14 @@ class MarketRadarApp:
         self.anomaly_scanning = False
         self.anomaly_status_var = tk.StringVar(value="Anomaly Radar: menyiapkan pemindaian seluruh pair IDR…")
         self._anomaly_window = None
+        self.anomaly_search_var = tk.StringVar(value="")
+        self.anomaly_severity_filter_var = tk.StringVar(value="All severities")
+        self.anomaly_detection_filter_var = tk.StringVar(value="All detections")
+        self.anomaly_sort_key = "severity"
+        self.anomaly_sort_reverse = False
+        self.anomaly_quick_focus_var = tk.StringVar(value="Belum ada hasil scan.")
+        self.anomaly_quick_metrics_var = tk.StringVar(value="Menunggu snapshot ticker pertama.")
+        self.anomaly_quick_action_var = tk.StringVar(value="Mulai dari Severity, lalu periksa Spread dan Bid depth sebelum mempertimbangkan eksekusi.")
         self.crypto_sort_key = "volume_idr"
         self.crypto_sort_reverse = True
         self.macro_sort_key: str | None = None
@@ -2884,7 +2894,7 @@ class MarketRadarApp:
         return "—" if number is None else f"{number:+.2f}%"
 
     def open_anomaly_radar(self) -> None:
-        """Show live all-pair anomaly detections and access the local event journal."""
+        """Show live all-pair anomaly detections with search, filters, sorting and quick guidance."""
         if self._anomaly_window is not None:
             try:
                 if self._anomaly_window.winfo_exists():
@@ -2896,8 +2906,11 @@ class MarketRadarApp:
         win = ctk.CTkToplevel(self.root)
         self._anomaly_window = win
         win.title("Market Radar · Anomaly Radar")
-        win.geometry("1120x650")
-        win.minsize(920, 520)
+        screen_w, screen_h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        window_w = min(1320, max(1000, screen_w - 40))
+        window_h = min(790, max(620, screen_h - 60))
+        win.geometry(f"{window_w}x{window_h}")
+        win.minsize(min(1080, window_w), min(650, window_h))
         win.transient(self.root)
         win.configure(fg_color=COLORS["bg"])
         win.protocol("WM_DELETE_WINDOW", lambda: self._close_anomaly_window(win))
@@ -2912,24 +2925,90 @@ class MarketRadarApp:
             header, text="ANOMALY RADAR · ALL INDODAX IDR PAIRS",
             text_color=COLORS["text"], font=("Segoe UI", 13, "bold"), anchor="w",
         ).pack(side="left", fill="x", expand=True)
+        button_style = {
+            "height": 29, "corner_radius": 7, "fg_color": COLORS["panel2"],
+            "hover_color": "#293b51", "text_color": COLORS["text"],
+            "border_width": 1, "border_color": COLORS["border"], "font": ("Segoe UI", 9),
+        }
         ctk.CTkButton(
-            header, text="Refresh scan", command=self._request_anomaly_scan,
-            width=104, height=29, corner_radius=7, fg_color=COLORS["panel2"],
-            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 9),
+            header, text="Indicator guide", command=self.open_anomaly_guide, width=112, **button_style,
         ).pack(side="left", padx=(5, 0))
         ctk.CTkButton(
-            header, text="History / Replay", command=self.open_anomaly_history,
-            width=116, height=29, corner_radius=7, fg_color=COLORS["panel2"],
-            hover_color="#293b51", text_color=COLORS["text"], border_width=1,
-            border_color=COLORS["border"], font=("Segoe UI", 9),
+            header, text="Refresh scan", command=self._request_anomaly_scan, width=104, **button_style,
+        ).pack(side="left", padx=(5, 0))
+        ctk.CTkButton(
+            header, text="History / Replay", command=self.open_anomaly_history, width=116, **button_style,
         ).pack(side="left", padx=(5, 0))
         ctk.CTkLabel(
             surface,
-            text="Deteksi menggunakan ticker seluruh pair IDR tiap 30 detik. Trade dan depth diperiksa hanya untuk maksimal 3 anomali teratas per scan dan mengikuti cooldown.",
+            text="Ticker seluruh pair IDR dipindai tiap 30 detik. Trade dan order book diperiksa hanya untuk maksimal 3 anomali teratas per siklus dan mengikuti cooldown.",
             text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w", justify="left",
-            wraplength=1020,
+            wraplength=1200,
         ).pack(fill="x", padx=14, pady=(0, 7))
+
+        # Compact controls keep a large pair list operational without crowding the table.
+        controls = ctk.CTkFrame(surface, fg_color=COLORS["panel2"], corner_radius=9)
+        controls.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(controls, text="Search", text_color=COLORS["muted"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(10, 5), pady=8)
+        search = ctk.CTkEntry(
+            controls, textvariable=self.anomaly_search_var, width=235, height=30,
+            placeholder_text="Pair, token, or detection…", corner_radius=7,
+            fg_color=COLORS["panel"], border_color=COLORS["border"],
+            text_color=COLORS["text"], placeholder_text_color=COLORS["muted"],
+            font=("Segoe UI", 9),
+        )
+        search.pack(side="left", padx=(0, 9), pady=6)
+        search.bind("<KeyRelease>", lambda _event: self._populate_anomaly_tree())
+        ctk.CTkLabel(controls, text="Severity", text_color=COLORS["muted"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
+        severity_filter = ctk.CTkComboBox(
+            controls, variable=self.anomaly_severity_filter_var, width=142, height=30,
+            values=["All severities", "CRITICAL", "HIGH", "WARNING"], state="readonly",
+            command=lambda _value: self._populate_anomaly_tree(),
+            fg_color=COLORS["panel"], border_color=COLORS["border"],
+            button_color=COLORS["panel2"], text_color=COLORS["text"],
+            dropdown_fg_color=COLORS["panel"], dropdown_text_color=COLORS["text"],
+            font=("Segoe UI", 9), dropdown_font=("Segoe UI", 9),
+        )
+        severity_filter.pack(side="left", padx=(0, 9), pady=6)
+        ctk.CTkLabel(controls, text="Detection", text_color=COLORS["muted"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
+        detection_filter = ctk.CTkComboBox(
+            controls, variable=self.anomaly_detection_filter_var, width=205, height=30,
+            values=["All detections", "24H WICK ANOMALY", "RAPID PRICE MOVE",
+                    "WIDE SPREAD", "VOLUME ACCELERATION"], state="readonly",
+            command=lambda _value: self._populate_anomaly_tree(),
+            fg_color=COLORS["panel"], border_color=COLORS["border"],
+            button_color=COLORS["panel2"], text_color=COLORS["text"],
+            dropdown_fg_color=COLORS["panel"], dropdown_text_color=COLORS["text"],
+            font=("Segoe UI", 9), dropdown_font=("Segoe UI", 9),
+        )
+        detection_filter.pack(side="left", padx=(0, 8), pady=6)
+        ctk.CTkButton(
+            controls, text="Clear", command=self._clear_anomaly_filters, width=58,
+            height=29, corner_radius=7, fg_color=COLORS["panel"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(0, 8), pady=6)
+        self.anomaly_result_count_var = tk.StringVar(value="0 results")
+        ctk.CTkLabel(controls, textvariable=self.anomaly_result_count_var,
+                     text_color=COLORS["muted"], font=("Segoe UI", 9)).pack(side="right", padx=10)
+
+        quick = ctk.CTkFrame(surface, fg_color=COLORS["panel2"], corner_radius=9)
+        quick.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(quick, text="QUICK READ · START HERE", text_color=COLORS["blue"],
+                     font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", padx=10, pady=(7, 2))
+        ctk.CTkLabel(quick, textvariable=self.anomaly_quick_focus_var,
+                     text_color=COLORS["text"], font=("Segoe UI", 10, "bold"),
+                     anchor="w", justify="left", wraplength=1200).pack(fill="x", padx=10, pady=(0, 2))
+        ctk.CTkLabel(quick, textvariable=self.anomaly_quick_metrics_var,
+                     text_color=COLORS["muted"], font=("Segoe UI", 9),
+                     anchor="w", justify="left", wraplength=1200).pack(fill="x", padx=10, pady=(0, 2))
+        ctk.CTkLabel(quick, textvariable=self.anomaly_quick_action_var,
+                     text_color=COLORS["yellow"], font=("Segoe UI", 9),
+                     anchor="w", justify="left", wraplength=1200).pack(fill="x", padx=10, pady=(0, 8))
+
         cols = ("asset", "severity", "flags", "price", "move1", "move5", "wick", "spread", "vol24", "trades", "book")
         tree_frame = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
         tree_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
@@ -2940,26 +3019,31 @@ class MarketRadarApp:
             "wick": "24h wick", "spread": "Spread", "vol24": "Vol 24h",
             "trades": "Trades 5m", "book": "Bid depth / Ask depth",
         }
-        widths = {"asset": 105, "severity": 75, "flags": 160, "price": 112, "move1": 68,
-                  "move5": 68, "wick": 80, "spread": 70, "vol24": 100, "trades": 76, "book": 150}
+        widths = {"asset": 105, "severity": 75, "flags": 175, "price": 112, "move1": 68,
+                  "move5": 68, "wick": 88, "spread": 76, "vol24": 105, "trades": 82, "book": 170}
         for col in cols:
-            tree.heading(col, text=headers[col], anchor="center")
+            tree.heading(
+                col, text=headers[col], anchor="center",
+                command=lambda key=col: self._sort_anomaly_tree(key),
+            )
             tree.column(col, width=widths[col], minwidth=58, anchor="center", stretch=(col in {"flags", "book"}))
         tree.tag_configure("critical", foreground=COLORS["red"])
         tree.tag_configure("high", foreground="#ff9b72")
         tree.tag_configure("warning", foreground=COLORS["yellow"])
         tree.tag_configure("empty", foreground=COLORS["muted"])
-        scroll = ctk.CTkScrollbar(tree_frame, orientation="vertical", command=tree.yview,
-                                  fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
-        tree.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
+        vertical = ctk.CTkScrollbar(tree_frame, orientation="vertical", command=tree.yview,
+                                    fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
+        horizontal = ctk.CTkScrollbar(tree_frame, orientation="horizontal", command=tree.xview,
+                                      fg_color=COLORS["panel"], button_color=COLORS["panel2"], height=10)
+        tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        vertical.pack(side="right", fill="y")
+        horizontal.pack(side="bottom", fill="x")
         tree.pack(fill="both", expand=True)
         tree.bind("<Double-Button-1>", lambda _event: self._show_selected_anomaly(tree))
         footer = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
         footer.pack(fill="x", padx=12, pady=(0, 9))
-        status = ctk.CTkLabel(footer, textvariable=self.anomaly_status_var,
-                              text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w")
-        status.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(footer, textvariable=self.anomaly_status_var,
+                     text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w").pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
             footer, text="View selected details", command=lambda: self._show_selected_anomaly(tree),
             width=145, height=29, corner_radius=7, fg_color="#2d72c7", hover_color="#3986df",
@@ -2967,7 +3051,85 @@ class MarketRadarApp:
             font=("Segoe UI", 9, "bold"),
         ).pack(side="right")
         self._anomaly_tree = tree
+        self._anomaly_headers = headers
         self._populate_anomaly_tree()
+
+    def _clear_anomaly_filters(self) -> None:
+        self.anomaly_search_var.set("")
+        self.anomaly_severity_filter_var.set("All severities")
+        self.anomaly_detection_filter_var.set("All detections")
+        self._populate_anomaly_tree()
+
+    def _sort_anomaly_tree(self, sort_key: str) -> None:
+        if sort_key == self.anomaly_sort_key:
+            self.anomaly_sort_reverse = not self.anomaly_sort_reverse
+        else:
+            self.anomaly_sort_key = sort_key
+            self.anomaly_sort_reverse = False
+        self._populate_anomaly_tree()
+
+    def open_anomaly_guide(self) -> None:
+        """Explain table fields, detection thresholds, and the order of operational review."""
+        win = ctk.CTkToplevel(self.root)
+        win.title("Market Radar · Anomaly Radar Indicator Guide")
+        win.geometry("800x680")
+        win.minsize(680, 540)
+        win.transient(self._anomaly_window or self.root)
+        win.configure(fg_color=COLORS["bg"])
+        panel = ctk.CTkFrame(win, fg_color=COLORS["panel"], border_color=COLORS["border"],
+                             border_width=1, corner_radius=14)
+        panel.pack(fill="both", expand=True, padx=12, pady=12)
+        ctk.CTkLabel(panel, text="CARA MEMBACA ANOMALY RADAR",
+                     text_color=COLORS["text"], font=("Segoe UI", 13, "bold"),
+                     anchor="w").pack(fill="x", padx=13, pady=(11, 5))
+        guide = (
+            "PRIORITAS: JANGAN BACA SEMUA KOLOM SEKALIGUS\n"
+            "1. Severity — mulai dari CRITICAL, lalu HIGH. Ini tingkat urgensi anomali, bukan peluang profit.\n"
+            "2. Detection dan 24h wick — cari tahu jenis anomali. Wick sangat besar sering berarti harga sekarang sudah jauh di bawah high; bukan target jual yang pasti bisa dieksekusi.\n"
+            "3. Spread — ukur biaya/friksi masuk-keluar. Spread lebar berarti harga bid dan ask berjauhan.\n"
+            "4. Bid depth dan Trades 5m — periksa apakah ada likuiditas beli dan transaksi aktual yang cukup.\n"
+            "5. Baru lihat Last IDR, perubahan 1m/5m, serta Vol 24h sebagai konteks.\n\n"
+            "ARTI KOLOM\n"
+            "Pair: simbol aset pada pasar rupiah, misalnya PIEVERSE/IDR.\n"
+            "Severity: CRITICAL / HIGH / WARNING menunjukkan prioritas pemeriksaan. CRITICAL saat jarak high 24 jam ke harga terakhir >= 1.000%; HIGH jika jarak >= 200%, perubahan cepat absolut >= 15%, atau spread >= 5%. WARNING untuk anomali yang melewati ambang deteksi tetapi belum masuk HIGH/CRITICAL.\n"
+            "Detection: alasan pair dimasukkan ke daftar. Satu pair bisa punya beberapa alasan sekaligus.\n"
+            "Last IDR: harga terakhir pada ticker Indodax, bukan jaminan harga eksekusi order.\n"
+            "1m / 5m: perubahan harga snapshot dibandingkan snapshot sekitar 1 atau 5 menit sebelumnya. Data baru tersedia setelah scanner mengumpulkan snapshot dengan jarak waktu yang cukup.\n"
+            "24h wick: persentase jarak high 24 jam di atas harga terakhir, dihitung (high / last - 1) x 100. Ini bukan persentase profit dan bukan harga yang dijamin bisa dijual.\n"
+            "Spread: selisih best ask dan best bid dibagi harga tengah (mid), dalam persen. Spread >= 2,5% memicu flag WIDE SPREAD.\n"
+            "Vol 24h: turnover rupiah 24 jam dari ticker. Angka besar tidak otomatis berarti order book tebal.\n"
+            "Trades 5m: jumlah transaksi publik dalam 5 menit terakhir. Pemeriksaan trade/depth dibatasi maksimal 3 pair teratas per siklus dan ada cooldown; 'Belum dicek' bukan berarti tidak ada transaksi.\n"
+            "Bid depth / Ask depth: perkiraan nilai rupiah order beli/jual yang terlihat dalam jarak 1% dari best bid/ask. Ini hanya snapshot order book, bisa berubah atau dibatalkan, dan bukan jaminan semua order dapat terisi.\n"
+            "Buy notional ratio: nilai transaksi buy dibagi total nilai transaksi buy+sell dalam 5 menit. Ini rasio nilai, bukan jumlah pembeli atau probabilitas harga naik.\n"
+            "Book imbalance: bid depth dibagi total bid+ask depth. Di atas 50% berarti nilai bid yang terlihat lebih besar; bukan jaminan harga akan naik.\n\n"
+            "ARTI DETECTION DAN AMBANGNYA\n"
+            "24H WICK ANOMALY: high 24 jam setidaknya 25% di atas harga terakhir.\n"
+            "RAPID PRICE MOVE: perubahan absolut >= 2% (1m), >= 4% (5m), atau >= 8% (15m).\n"
+            "WIDE SPREAD: spread bid/ask >= 2,5%.\n"
+            "VOLUME ACCELERATION: kenaikan ticker vol_idr sekitar >= Rp20 juta selama 5 menit. PENTING: ini proxy dari perubahan ticker volume 24 jam yang berjalan, bukan jumlah transaksi 5 menit yang diverifikasi dari endpoint trades.\n\n"
+            "BATASAN OPERASIONAL\n"
+            "• Scanner mengambil snapshot ticker tiap 30 detik; gerakan yang sangat cepat di antara snapshot dapat terlewat.\n"
+            "• Trade dan order book hanya diperiksa untuk maksimal 3 anomali teratas per siklus, mengikuti cooldown.\n"
+            "• CRITICAL/HIGH berarti periksa lebih dulu, bukan otomatis BUY atau SELL. Sebelum keputusan, periksa spread, transaksi, dan bid depth.\n"
+            "• High 24 jam tidak membuktikan bahwa seluruh posisi dapat dijual pada harga high tersebut.\n"
+            "• Data scanner tidak membaca saldo/posisi akun dan tidak mengirim order.\n"
+        )
+        output = tk.Text(panel, wrap="word", bg=COLORS["panel"], fg=COLORS["text"],
+                         insertbackground=COLORS["text"], relief="flat", padx=13, pady=10,
+                         font=("Segoe UI", 10), borderwidth=0, highlightthickness=0)
+        scroll = ctk.CTkScrollbar(panel, orientation="vertical", command=output.yview,
+                                  fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
+        output.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y", padx=(0, 8), pady=8)
+        output.pack(fill="both", expand=True, padx=(8, 0), pady=8)
+        output.insert("1.0", guide)
+        output.configure(state="disabled")
+        ctk.CTkButton(
+            panel, text="Close", command=win.destroy, width=80, height=30,
+            corner_radius=7, fg_color=COLORS["panel2"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="e", padx=12, pady=(0, 10))
 
     def _close_anomaly_window(self, win: Any) -> None:
         try:
@@ -2995,10 +3157,25 @@ class MarketRadarApp:
         try:
             for iid in tree.get_children():
                 tree.delete(iid)
-            rows = self.anomaly_engine.active_alerts
+            all_rows = list(self.anomaly_engine.active_alerts)
+            self._update_anomaly_quick_read(all_rows)
+            rows = filter_anomaly_rows(
+                all_rows, self.anomaly_search_var.get(),
+                self.anomaly_severity_filter_var.get(), self.anomaly_detection_filter_var.get(),
+            )
+            rows = sort_anomaly_rows(rows, self.anomaly_sort_key, self.anomaly_sort_reverse)
+            total = len(all_rows)
+            self.anomaly_result_count_var.set(f"{len(rows)} / {total} active alerts")
+            for col, title in self._anomaly_headers.items():
+                suffix = " ↓" if col == self.anomaly_sort_key and self.anomaly_sort_reverse else (" ↑" if col == self.anomaly_sort_key else "")
+                tree.heading(
+                    col, text=title + suffix, anchor="center",
+                    command=lambda key=col: self._sort_anomaly_tree(key),
+                )
             if not rows:
+                label = "No active alert" if not all_rows else "No matching result"
                 tree.insert("", "end", iid="__empty__", values=(
-                    "No active alert", "—", "Belum terdeteksi", "—", "—", "—", "—", "—", "—", "—", "—",
+                    label, "—", "Ubah search/filter", "—", "—", "—", "—", "—", "—", "—", "—",
                 ), tags=("empty",))
                 return
             for row in rows:
@@ -3021,6 +3198,35 @@ class MarketRadarApp:
                 tree.insert("", "end", iid=str(row.get("symbol")), values=values, tags=(tag,))
         except tk.TclError:
             return
+
+    def _update_anomaly_quick_read(self, rows: list[dict[str, Any]]) -> None:
+        counts = {level: sum(1 for row in rows if row.get("severity") == level)
+                  for level in ("CRITICAL", "HIGH", "WARNING")}
+        if not rows:
+            self.anomaly_quick_focus_var.set("Tidak ada anomali aktif yang melewati ambang deteksi pada snapshot terakhir.")
+            self.anomaly_quick_metrics_var.set(
+                f"CRITICAL {counts['CRITICAL']}  ·  HIGH {counts['HIGH']}  ·  WARNING {counts['WARNING']}  ·  Total {len(rows)}"
+            )
+            self.anomaly_quick_action_var.set("Tetap pantau refresh berikutnya. Tidak ada alert bukan berarti semua pair bebas risiko.")
+            return
+        top = sort_anomaly_rows(rows, "severity", False)[0]
+        symbol = str(top.get("symbol") or "—")
+        flags = ", ".join(str(item) for item in (top.get("flags") or [])) or "Anomali terdeteksi"
+        severity = str(top.get("severity") or "WARNING")
+        self.anomaly_quick_focus_var.set(f"PRIORITAS UTAMA: {severity} · {symbol}/IDR · {flags}")
+        self.anomaly_quick_metrics_var.set(
+            f"CRITICAL {counts['CRITICAL']}  ·  HIGH {counts['HIGH']}  ·  WARNING {counts['WARNING']}  ·  "
+            f"Spread {self._anomaly_pct_text(top.get('spread_pct'))}  ·  "
+            f"Trades 5m {top.get('trade_count_5m') if top.get('trade_count_5m') is not None else 'Belum dicek'}  ·  "
+            f"Bid depth ±1% {fmt_volume_idr(top.get('bid_depth_1pct_idr')) if top.get('bid_depth_1pct_idr') is not None else 'Belum dicek'}"
+        )
+        if severity == "CRITICAL":
+            advice = "Periksa detail kejadian lebih dulu. Bila pemicunya 24h wick ekstrem, anggap sebagai anomali harga yang perlu diverifikasi—bukan sinyal BUY atau harga jual yang pasti tersedia."
+        elif severity == "HIGH":
+            advice = "Periksa spread, transaksi aktual, dan bid depth sebelum mempertimbangkan tindakan. Pergerakan cepat dapat berbalik sebelum order terisi."
+        else:
+            advice = "Mulai dari jenis Detection, lalu periksa spread dan kedalaman bid. WARNING tetap perlu diperiksa, tetapi urgensinya di bawah CRITICAL/HIGH."
+        self.anomaly_quick_action_var.set(advice)
 
     def _show_selected_anomaly(self, tree: Any) -> None:
         selected = tree.selection()
@@ -3122,6 +3328,8 @@ class MarketRadarApp:
             f"Spread: {self._anomaly_pct_text(row.get('spread_pct'))}",
             f"24h turnover: {fmt_volume_idr(row.get('volume_24h_idr'))}",
             f"Recent trades (5m): {row.get('trade_count_5m', 'not available')} · notional {fmt_volume_idr(row.get('trade_notional_5m_idr'))}",
+            f"Buy / sell notional (5m): {fmt_volume_idr(row.get('buy_notional_5m_idr'))} / {fmt_volume_idr(row.get('sell_notional_5m_idr'))}",
+            f"Buy notional ratio (5m): {self._anomaly_pct_text((num(row.get('buy_ratio_5m')) or 0) * 100) if row.get('buy_ratio_5m') is not None else '—'}",
             f"Order-book depth ±1%: bid {fmt_volume_idr(row.get('bid_depth_1pct_idr'))} / ask {fmt_volume_idr(row.get('ask_depth_1pct_idr'))}",
             f"Book imbalance: {self._anomaly_pct_text((num(row.get('book_imbalance')) or 0) * 100) if row.get('book_imbalance') is not None else '—'}",
             "",

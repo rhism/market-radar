@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
-APP_VERSION = "1.13.0"
+APP_VERSION = "1.13.1"
 BASE_URL = "https://indodax.com"
 SUMMARY_URL = BASE_URL + "/api/summaries"
 SCAN_INTERVAL_SECONDS = 30
@@ -76,6 +76,71 @@ def _request_json(url: str) -> Any:
             raise RuntimeError(f"HTTP {response.status}")
         payload = response.read(3_000_000)
     return json.loads(payload.decode("utf-8", errors="replace"))
+
+
+def filter_anomaly_rows(
+    rows: list[dict[str, Any]],
+    query: str = "",
+    severity: str = "All severities",
+    detection: str = "All detections",
+) -> list[dict[str, Any]]:
+    """Filter active anomaly rows by a free-text query, severity, and detection flag."""
+    needle = _normalise(query)
+    severity_key = str(severity or "All severities").strip().upper()
+    detection_key = str(detection or "All detections").strip().upper()
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        if severity_key not in {"", "ALL", "ALL SEVERITIES"} and str(row.get("severity") or "").upper() != severity_key:
+            continue
+        flags = [str(item).upper() for item in (row.get("flags") or [])]
+        if detection_key not in {"", "ALL", "ALL DETECTIONS"} and detection_key not in flags:
+            continue
+        haystack = _normalise(" ".join([
+            str(row.get("symbol") or ""), str(row.get("name") or ""),
+            str(row.get("pair_id") or ""), " ".join(flags),
+            " ".join(str(item) for item in (row.get("evidence") or [])),
+        ]))
+        if needle and needle not in haystack:
+            continue
+        output.append(row)
+    return output
+
+
+def sort_anomaly_rows(
+    rows: list[dict[str, Any]], sort_key: str = "severity", reverse: bool = False,
+) -> list[dict[str, Any]]:
+    """Sort anomaly rows while keeping missing values at the bottom in either direction."""
+    severity_rank = {"CRITICAL": 0, "HIGH": 1, "WARNING": 2, "INFO": 3}
+
+    def value(row: dict[str, Any]) -> Any:
+        if sort_key == "asset":
+            return _normalise(f"{row.get('symbol') or ''} {row.get('name') or ''}")
+        if sort_key == "severity":
+            return severity_rank.get(str(row.get("severity") or "").upper())
+        if sort_key == "flags":
+            return " · ".join(str(item) for item in (row.get("flags") or [])).casefold()
+        if sort_key == "price":
+            return finite_number(row.get("price"))
+        if sort_key == "move1":
+            return finite_number(row.get("change_1m_pct"))
+        if sort_key == "move5":
+            return finite_number(row.get("change_5m_pct"))
+        if sort_key == "wick":
+            return finite_number(row.get("wick_from_high_pct"))
+        if sort_key == "spread":
+            return finite_number(row.get("spread_pct"))
+        if sort_key == "vol24":
+            return finite_number(row.get("volume_24h_idr"))
+        if sort_key == "trades":
+            return finite_number(row.get("trade_count_5m"))
+        if sort_key == "book":
+            return finite_number(row.get("bid_depth_1pct_idr"))
+        return None
+
+    available = [row for row in rows if value(row) is not None]
+    missing = [row for row in rows if value(row) is None]
+    available.sort(key=value, reverse=bool(reverse))
+    return available + missing
 
 
 def calculate_trade_metrics(trades: Any, now_timestamp: float | None = None) -> dict[str, Any]:
