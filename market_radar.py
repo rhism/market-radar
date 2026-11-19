@@ -18,10 +18,11 @@ import customtkinter as ctk
 import potential_coin_radar as pcr
 from anomaly_radar import (
     MarketAnomalyEngine, SCAN_INTERVAL_SECONDS, filter_anomaly_rows, sort_anomaly_rows,
+    filter_anomaly_history_rows, sort_anomaly_history_rows,
 )
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.13.1"
+APP_VERSION = "1.13.2"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -3239,10 +3240,11 @@ class MarketRadarApp:
         self._show_anomaly_detail_window("Active anomaly · " + symbol, row)
 
     def open_anomaly_history(self) -> None:
-        history = self.anomaly_engine.get_history(limit=200)
+        history = self.anomaly_engine.get_history(limit=500)
         win = ctk.CTkToplevel(self.root)
         win.title("Market Radar · Anomaly History / Replay")
-        win.geometry("900x560")
+        win.geometry("1120x650")
+        win.minsize(980, 580)
         win.transient(self.root)
         win.configure(fg_color=COLORS["bg"])
         surface = ctk.CTkFrame(win, fg_color=COLORS["panel"], border_color=COLORS["border"],
@@ -3254,10 +3256,51 @@ class MarketRadarApp:
         ).pack(fill="x", padx=13, pady=(11, 4))
         ctk.CTkLabel(
             surface,
-            text="Catatan lokal dimulai sejak Anomaly Radar v1.13.0 dijalankan. Ini bukan backfill historis sebelum pemasangan dan bukan rekonstruksi setiap transaksi.",
+            text="Catatan lokal dimulai sejak Anomaly Radar v1.13.0 dijalankan. Maksimal 500 event terbaru disimpan; ini bukan backfill historis sebelum pemasangan atau rekonstruksi setiap transaksi.",
             text_color=COLORS["muted"], font=("Segoe UI", 9), anchor="w", justify="left",
-            wraplength=820,
+            wraplength=1060,
         ).pack(fill="x", padx=13, pady=(0, 7))
+
+        controls = ctk.CTkFrame(surface, fg_color=COLORS["panel2"], corner_radius=9)
+        controls.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(controls, text="Search", text_color=COLORS["muted"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(10, 5), pady=8)
+        search_var = tk.StringVar(value="")
+        search = ctk.CTkEntry(
+            controls, textvariable=search_var, width=245, height=30,
+            placeholder_text="Pair, token, event, or evidence…", corner_radius=7,
+            fg_color=COLORS["panel"], border_color=COLORS["border"],
+            text_color=COLORS["text"], placeholder_text_color=COLORS["muted"],
+            font=("Segoe UI", 9),
+        )
+        search.pack(side="left", padx=(0, 9), pady=6)
+        severity_var = tk.StringVar(value="All severities")
+        ctk.CTkLabel(controls, text="Severity", text_color=COLORS["muted"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
+        severity_filter = ctk.CTkComboBox(
+            controls, variable=severity_var, width=135, height=30,
+            values=["All severities", "CRITICAL", "HIGH", "WARNING"], state="readonly",
+            fg_color=COLORS["panel"], border_color=COLORS["border"],
+            button_color=COLORS["panel2"], text_color=COLORS["text"],
+            dropdown_fg_color=COLORS["panel"], dropdown_text_color=COLORS["text"],
+            font=("Segoe UI", 9), dropdown_font=("Segoe UI", 9),
+        )
+        severity_filter.pack(side="left", padx=(0, 9), pady=6)
+        detection_var = tk.StringVar(value="All detections")
+        ctk.CTkLabel(controls, text="Detection", text_color=COLORS["muted"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
+        detection_filter = ctk.CTkComboBox(
+            controls, variable=detection_var, width=205, height=30,
+            values=["All detections", "24H WICK ANOMALY", "RAPID PRICE MOVE",
+                    "WIDE SPREAD", "VOLUME ACCELERATION"], state="readonly",
+            fg_color=COLORS["panel"], border_color=COLORS["border"],
+            button_color=COLORS["panel2"], text_color=COLORS["text"],
+            dropdown_fg_color=COLORS["panel"], dropdown_text_color=COLORS["text"],
+            font=("Segoe UI", 9), dropdown_font=("Segoe UI", 9),
+        )
+        detection_filter.pack(side="left", padx=(0, 8), pady=6)
+        result_count_var = tk.StringVar(value="0 / 0 events")
+
         cols = ("time", "asset", "type", "severity", "price", "move5", "wick", "spread")
         frame = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
         frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
@@ -3265,41 +3308,100 @@ class MarketRadarApp:
         headers = {"time": "Detected (WIB)", "asset": "Pair", "type": "Event",
                    "severity": "Severity", "price": "Captured price", "move5": "5m move",
                    "wick": "24h wick", "spread": "Spread"}
-        widths = {"time": 150, "asset": 100, "type": 155, "severity": 80,
-                  "price": 120, "move5": 85, "wick": 90, "spread": 80}
+        widths = {"time": 170, "asset": 100, "type": 185, "severity": 85,
+                  "price": 125, "move5": 90, "wick": 100, "spread": 90}
+        sort_state = {"key": "time", "reverse": True}
+        original_indices = {id(event): index for index, event in enumerate(history)}
+
         for col in cols:
-            tree.heading(col, text=headers[col], anchor="center")
             tree.column(col, width=widths[col], minwidth=65, anchor="center")
         tree.tag_configure("critical", foreground=COLORS["red"])
         tree.tag_configure("high", foreground="#ff9b72")
         tree.tag_configure("warning", foreground=COLORS["yellow"])
-        for index, event in enumerate(history):
-            tree.insert("", "end", iid=str(index), values=(
-                event.get("detected_at", "—"), f"{event.get('symbol', '—')}/IDR",
-                event.get("anomaly_type", "—"), event.get("severity", "—"),
-                self._anomaly_price_text(event.get("price")),
-                self._anomaly_pct_text(event.get("change_5m_pct")),
-                self._anomaly_pct_text(event.get("wick_from_high_pct")),
-                self._anomaly_pct_text(event.get("spread_pct")),
-            ), tags=(str(event.get("severity", "WARNING")).lower(),))
-        if not history:
-            tree.insert("", "end", values=("Belum ada event", "—", "Mulai scan dulu", "—", "—", "—", "—", "—"))
-        scroll = ctk.CTkScrollbar(frame, orientation="vertical", command=tree.yview,
-                                  fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
-        tree.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
+        tree.tag_configure("empty", foreground=COLORS["muted"])
+
+        def render_history() -> None:
+            for item in tree.get_children():
+                tree.delete(item)
+            filtered = filter_anomaly_history_rows(
+                history, search_var.get(), severity_var.get(), detection_var.get(),
+            )
+            rows = sort_anomaly_history_rows(filtered, sort_state["key"], sort_state["reverse"])
+            result_count_var.set(f"{len(rows)} / {len(history)} events")
+            for col, title in headers.items():
+                suffix = " ↓" if col == sort_state["key"] and sort_state["reverse"] else (
+                    " ↑" if col == sort_state["key"] else ""
+                )
+                tree.heading(
+                    col, text=title + suffix, anchor="center",
+                    command=lambda key=col: change_history_sort(key),
+                )
+            if not rows:
+                label = "Belum ada event" if not history else "No matching event"
+                hint = "Mulai scan dulu" if not history else "Ubah search atau filter"
+                tree.insert("", "end", iid="__empty__", values=(
+                    label, "—", hint, "—", "—", "—", "—", "—",
+                ), tags=("empty",))
+                return
+            for event in rows:
+                iid = str(original_indices[id(event)])
+                tree.insert("", "end", iid=iid, values=(
+                    event.get("detected_at", "—"), f"{event.get('symbol', '—')}/IDR",
+                    event.get("anomaly_type", "—"), event.get("severity", "—"),
+                    self._anomaly_price_text(event.get("price")),
+                    self._anomaly_pct_text(event.get("change_5m_pct")),
+                    self._anomaly_pct_text(event.get("wick_from_high_pct")),
+                    self._anomaly_pct_text(event.get("spread_pct")),
+                ), tags=(str(event.get("severity", "WARNING")).lower(),))
+
+        def change_history_sort(sort_key: str) -> None:
+            if sort_key == sort_state["key"]:
+                sort_state["reverse"] = not sort_state["reverse"]
+            else:
+                sort_state["key"] = sort_key
+                sort_state["reverse"] = False
+            render_history()
+
+        def clear_history_filters() -> None:
+            search_var.set("")
+            severity_var.set("All severities")
+            detection_var.set("All detections")
+            render_history()
+
+        search.bind("<KeyRelease>", lambda _event: render_history())
+        severity_filter.configure(command=lambda _value: render_history())
+        detection_filter.configure(command=lambda _value: render_history())
+        ctk.CTkButton(
+            controls, text="Clear", command=clear_history_filters, width=58,
+            height=29, corner_radius=7, fg_color=COLORS["panel"], hover_color="#293b51",
+            text_color=COLORS["text"], border_width=1, border_color=COLORS["border"],
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(0, 8), pady=6)
+        ctk.CTkLabel(controls, textvariable=result_count_var,
+                     text_color=COLORS["muted"], font=("Segoe UI", 9)).pack(side="right", padx=10)
+
+        vertical = ctk.CTkScrollbar(frame, orientation="vertical", command=tree.yview,
+                                    fg_color=COLORS["panel"], button_color=COLORS["panel2"], width=10)
+        horizontal = ctk.CTkScrollbar(frame, orientation="horizontal", command=tree.xview,
+                                      fg_color=COLORS["panel"], button_color=COLORS["panel2"], height=10)
+        tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        vertical.pack(side="right", fill="y")
+        horizontal.pack(side="bottom", fill="x")
         tree.pack(fill="both", expand=True)
         tree.bind("<Double-Button-1>", lambda _event: self._show_selected_history_event(tree, history))
+        footer = ctk.CTkFrame(surface, fg_color="transparent", corner_radius=0)
+        footer.pack(fill="x", padx=12, pady=(0, 9))
         ctk.CTkButton(
-            surface, text="View selected event", command=lambda: self._show_selected_history_event(tree, history),
+            footer, text="View selected event", command=lambda: self._show_selected_history_event(tree, history),
             width=150, height=30, corner_radius=7, fg_color="#2d72c7", hover_color="#3986df",
             text_color=COLORS["white"], border_width=1, border_color="#3d83d4",
             font=("Segoe UI", 9, "bold"),
-        ).pack(anchor="e", padx=13, pady=(0, 10))
+        ).pack(side="right")
+        render_history()
 
     def _show_selected_history_event(self, tree: Any, history: list[dict[str, Any]]) -> None:
         selected = tree.selection()
-        if not selected:
+        if not selected or selected[0] == "__empty__":
             return
         try:
             event = history[int(selected[0])]

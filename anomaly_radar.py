@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
-APP_VERSION = "1.13.1"
+APP_VERSION = "1.13.2"
 BASE_URL = "https://indodax.com"
 SUMMARY_URL = BASE_URL + "/api/summaries"
 SCAN_INTERVAL_SECONDS = 30
@@ -139,6 +139,71 @@ def sort_anomaly_rows(
 
     available = [row for row in rows if value(row) is not None]
     missing = [row for row in rows if value(row) is None]
+    available.sort(key=value, reverse=bool(reverse))
+    return available + missing
+
+
+def filter_anomaly_history_rows(
+    events: list[dict[str, Any]],
+    query: str = "",
+    severity: str = "All severities",
+    detection: str = "All detections",
+) -> list[dict[str, Any]]:
+    """Filter persisted anomaly events by text, severity, and event type."""
+    needle = _normalise(query)
+    severity_key = str(severity or "All severities").strip().upper()
+    detection_key = str(detection or "All detections").strip().upper()
+    output: list[dict[str, Any]] = []
+    for event in events:
+        if severity_key not in {"", "ALL", "ALL SEVERITIES"}:
+            if str(event.get("severity") or "").upper() != severity_key:
+                continue
+        event_type = str(event.get("anomaly_type") or "").upper()
+        if detection_key not in {"", "ALL", "ALL DETECTIONS"} and event_type != detection_key:
+            continue
+        haystack = _normalise(" ".join([
+            str(event.get("symbol") or ""), str(event.get("name") or ""),
+            str(event.get("pair_id") or ""), event_type,
+            str(event.get("severity") or ""), str(event.get("detected_at") or ""),
+            " ".join(str(item) for item in (event.get("evidence") or [])),
+        ]))
+        if needle and needle not in haystack:
+            continue
+        output.append(event)
+    return output
+
+
+def sort_anomaly_history_rows(
+    events: list[dict[str, Any]], sort_key: str = "time", reverse: bool = True,
+) -> list[dict[str, Any]]:
+    """Sort persisted events; missing metrics remain at the bottom both ways."""
+    severity_rank = {"CRITICAL": 0, "HIGH": 1, "WARNING": 2, "INFO": 3}
+
+    def value(event: dict[str, Any]) -> Any:
+        if sort_key == "time":
+            timestamp = finite_number(event.get("timestamp_epoch"))
+            if timestamp is not None:
+                return (0, timestamp)
+            detected_at = str(event.get("detected_at") or "")
+            return (1, detected_at) if detected_at else None
+        if sort_key == "asset":
+            return _normalise(f"{event.get('symbol') or ''} {event.get('name') or ''}") or None
+        if sort_key == "type":
+            return str(event.get("anomaly_type") or "").casefold() or None
+        if sort_key == "severity":
+            return severity_rank.get(str(event.get("severity") or "").upper())
+        if sort_key == "price":
+            return finite_number(event.get("price"))
+        if sort_key == "move5":
+            return finite_number(event.get("change_5m_pct"))
+        if sort_key == "wick":
+            return finite_number(event.get("wick_from_high_pct"))
+        if sort_key == "spread":
+            return finite_number(event.get("spread_pct"))
+        return None
+
+    available = [event for event in events if value(event) is not None]
+    missing = [event for event in events if value(event) is None]
     available.sort(key=value, reverse=bool(reverse))
     return available + missing
 
