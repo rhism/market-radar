@@ -44,7 +44,7 @@ class AiModesTest(unittest.TestCase):
 
     def test_default_model_is_a_specific_free_model(self):
         self.assertEqual(mr.DEFAULT_AI_MODEL, "google/gemma-4-31b-it:free")
-        self.assertEqual(mr.APP_VERSION, "1.13.2")
+        self.assertEqual(mr.APP_VERSION, "1.13.3")
 
     def test_legacy_default_router_is_migrated_to_gemma(self):
         with tempfile.TemporaryDirectory() as tmp:

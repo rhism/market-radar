@@ -15,6 +15,7 @@ from typing import Any
 import tkinter as tk
 from tkinter import ttk, messagebox
 import customtkinter as ctk
+from market_categories import INDODAX_CATEGORY_OPTIONS, filter_assets_by_category
 import potential_coin_radar as pcr
 from anomaly_radar import (
     MarketAnomalyEngine, SCAN_INTERVAL_SECONDS, filter_anomaly_rows, sort_anomaly_rows,
@@ -22,7 +23,7 @@ from anomaly_radar import (
 )
 
 APP_NAME = "Market Radar"
-APP_VERSION = "1.13.2"
+APP_VERSION = "1.13.3"
 WIB = timezone(timedelta(hours=7), name="WIB")
 INDODAX_URL = "https://indodax.com/api/summaries"
 INDODAX_PAIRS_URL = "https://indodax.com/api/pairs"
@@ -151,6 +152,7 @@ def filter_crypto_assets(
     data: dict[str, dict[str, Any]],
     query: str = "",
     filter_name: str = "All assets",
+    category_filter: str = "All categories",
 ) -> list[tuple[str, str]]:
     """Filter already-loaded assets locally; this never triggers a network request."""
     needle = norm(query)
@@ -177,7 +179,7 @@ def filter_crypto_assets(
         if filter_key == "high volume" and (cutoff is None or volume is None or volume < cutoff):
             continue
         matches.append((symbol, name))
-    return matches
+    return filter_assets_by_category(matches, category_filter)
 
 
 def parse_epoch(value: Any) -> datetime | None:
@@ -2226,6 +2228,7 @@ class MarketRadarApp:
         self.macro_sort_reverse = False
         self.crypto_search_var = tk.StringVar()
         self.crypto_filter_var = tk.StringVar(value="All assets")
+        self.crypto_category_var = tk.StringVar(value="All categories")
         self.macro_category_var = tk.StringVar(value="All markets")
         self.comfortable_rows = False
         self.last_macro_fetch = 0.0
@@ -2441,6 +2444,17 @@ class MarketRadarApp:
             dropdown_font=("Segoe UI", 10),
         )
         self.crypto_filter_combo.pack(side="left")
+        self.crypto_category_combo = ctk.CTkOptionMenu(
+            crypto_toolbar, variable=self.crypto_category_var,
+            values=list(INDODAX_CATEGORY_OPTIONS),
+            command=lambda _value: self._render_crypto(), width=145, height=30,
+            corner_radius=8, fg_color=COLORS["panel2"], button_color=COLORS["panel2"],
+            button_hover_color="#293b51", dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color="#293b51", text_color=COLORS["text"],
+            dropdown_text_color=COLORS["text"], font=("Segoe UI", 10),
+            dropdown_font=("Segoe UI", 10),
+        )
+        self.crypto_category_combo.pack(side="left", padx=(7, 0))
         self.crypto_count_var = tk.StringVar(value="0 / 0")
         ctk.CTkLabel(
             crypto_toolbar, textvariable=self.crypto_count_var, text_color=COLORS["muted"],
@@ -3472,7 +3486,8 @@ class MarketRadarApp:
         for item in self.crypto_tree.get_children():
             self.crypto_tree.delete(item)
         rows = filter_crypto_assets(CRYPTO_ASSETS, self.crypto_data,
-                                    self.crypto_search_var.get(), self.crypto_filter_var.get())
+                                    self.crypto_search_var.get(), self.crypto_filter_var.get(),
+                                    self.crypto_category_var.get())
 
         def value_for(pair: tuple[str, str]) -> Any:
             symbol, name = pair
